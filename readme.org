@@ -1,0 +1,63 @@
+#+TITLE: org-notion
+#+DESCRIPTION: Notion.so Org-mode Extension
+#+AUTHOR: ellis <ellis@rwest.io>
+
+[[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for notes. It is a very powerful
+text-based system for organizing your life in plaintext.
+
+[[https://www.notion.so][Notion]] is a web-based notes application. It works well on all
+platforms and has some cool features including databases, realtime
+collaboration, and as of 2021 an [[https://developers.notion.com/][official API]].
+
+=org-notion= is a simple package that uses this API to integrate the
+beauty of Notion with your Org-mode workflow.
+
+* Installation
+=org-notion= only depends on built-in Emacs libraries. To
+install, simply clone the repo:
+#+begin_src shell
+  git clone https://github.com/richardwesthaver/org-notion
+  # OR `hg clone https://hg.rwest.io/org-notion`
+#+end_src
+
+and make sure your =load-path= is setup correctly in your config:
+#+begin_src emacs-lisp
+  (add-to-list 'load-path "/path/to/org-notion")
+#+end_src
+
+Now you can load the package with:
+#+begin_src emacs-lisp
+  (require 'org-notion)
+#+end_src
+
+* Configuration
+You should create a [[https://www.notion.so/my-integrations][private integration]] on the Notion side if you
+haven't already. This will generate a new Internal Integration Token
+which is used to authenticate API requests from Emacs.
+
+When running a command for the first time such as
+=org-notion-get-users= you will be prompted for your token. This sets
+the variable =org-notion-token= which will be used for proceeding
+calls but will not persist across sessions (after restarting the emacs
+daemon).
+
+The default behavior is to first check with [[https://www.gnu.org/software/emacs/manual/html_mono/auth/index.html][auth-sources]] before
+sending requests (=~/.authinfo= or =~/.authinfo.gpg=). This is highly
+recommended as it avoids the prompt and is more secure. You can
+disable the check if you wish to temporarily use a different token
+with =(setq org-notion-check-auth-source nil)=.
+* Usage
+* Examples
+** GTD
+** Links
+* Resources
+- Notion
+  - [[https://developers.notion.com/][API docs]]
+  - [[https://developers.notion.com/page/examples][examples]]
+- Emacs
+  - [[https://www.gnu.org/software/emacs/manual/html_mono/url.html][url]]
+  - [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Parsing-JSON.html][parsing json]]
+  - [[https://github.com/doublep/eldev][eldev]]
+  - [[https://www.gnu.org/software/emacs/manual/html_node/ert/index.html][ert]]
+- Prior Art
+  - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
