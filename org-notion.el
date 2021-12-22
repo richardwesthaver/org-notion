@@ -68,10 +68,9 @@ first. If 'nil' or token is missing, prompt for token."
 				 (let ((sec (plist-get found :secret)))
 				   (if (functionp sec)
 				       (funcall sec)
-				     sec))
-				 ))))
+				     sec))))))
   (unless org-notion-token
-    (read-passwd "Notion API Token: ")))
+    (setq org-notion-token (read-passwd "Notion API Token: "))))
   
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
