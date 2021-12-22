@@ -1,4 +1,2 @@
 ; -*- mode: emacs-lisp; lexical-binding: t -*-
 (setf eldev-project-main-file "org-notion.el")
-
-

@@ -61,3 +61,7 @@ with =(setq org-notion-check-auth-source nil)=.
   - [[https://www.gnu.org/software/emacs/manual/html_node/ert/index.html][ert]]
 - Prior Art
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
+
+* COMMENT notes
+- set ID property to notion ID - both use UUIDv4
+  - [[help:thing-at-point-uuid-regexp]]
