@@ -22,7 +22,6 @@
 ;;; Commentary:
 ;; 
 ;; 
-;; 
 ;;; Code:
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an `auth-source' entry.")
@@ -52,25 +51,26 @@ You can generate one at URL `https://www.notion.so/my-integrations'.")
   "Default count of results returned by Notion. Additional calls
 will be made to collect all results using the 'start_cursor' parameter. Maximum value is 100.")
 
-(defun org-notion-find-token ()
+;; RESEARCH 2021-12-28: auth-source secret const function security reccs
+(defun org-notion-find-token (&optional token)
   "Provision VAR `org-notion-token'.
 If `org-notion-use-auth-source' is 't' check auth-source
 first. If 'nil' or token is missing, prompt for token."
-  (interactive)
-  (if (and org-notion-use-auth-source
-	   (not org-notion-token))
+  (when (and org-notion-use-auth-source
+	     (not org-notion-token))
+    ;; TODO 2021-12-28: add default user/host/port with let*
       (let ((found (nth 0 (auth-source-search
 			   :max 1
 			   :host org-notion-host
 			   :require '(:secret)
 			   :create t))))
-	(setq org-notion-token (while found
+	(setq org-notion-token (when found
 				 (let ((sec (plist-get found :secret)))
 				   (if (functionp sec)
 				       (funcall sec)
 				     sec))))))
-  (unless org-notion-token
-    (setq org-notion-token (read-passwd "Notion API Token: "))))
+  (unless org-notion-use-auth-source
+    (setq org-notion-token (or token (read-passwd "Notion API Token: ")))))
   
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
