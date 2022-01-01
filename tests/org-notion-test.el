@@ -50,7 +50,7 @@
   (should (org-notion-get-users)))
 
 (ert-deftest org-notion-search-ok ()
-  (should (org-notion-search "test_query")))
+  (should (org-notion-search "org-notion")))
 
 (provide 'org-notion-test)
 ;;; org-notion-test.el ends here

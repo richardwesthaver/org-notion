@@ -23,6 +23,7 @@
 ;; 
 ;; 
 ;;; Code:
+(require 'auth-source)
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an `auth-source' entry.")
 
@@ -70,17 +71,16 @@ first. If 'nil' or token is missing, prompt for token."
 				       (funcall sec)
 				     sec))))))
   (unless org-notion-use-auth-source
-    (setq org-notion-token (or token (read-passwd "Notion API Token: ")))))
+    (setq org-notion-token (or token (read-passwd "Notion API Token: "))))
+  org-notion-token)
   
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
 `org-notion-token'"
   (interactive)
-  (unless org-notion-token
-    (org-notion-find-token))
   (let ((url-request-method "GET")
 	(url-request-extra-headers
-	 `(("Authorization" . ,(concat "Bearer " org-notion-token))
+	 `(("Authorization" . ,(concat "Bearer " (org-notion-find-token)))
 	   ("Notion-Version" . ,org-notion-version))))
     (url-retrieve (concat org-notion-endpoint "users/me") (lambda (_status) (switch-to-buffer (current-buffer))))))
 
@@ -89,16 +89,22 @@ first. If 'nil' or token is missing, prompt for token."
 status code if your integration doesn't have User Capabilities
 enabled."
   (interactive)
-  (unless org-notion-token
-    (org-notion-find-token))
   (let ((url-request-method "GET")
 	(url-request-extra-headers
-	 `(("Authorization" . ,(concat "Bearer " org-notion-token))
+	 `(("Authorization" . ,(concat "Bearer " (org-notion-find-token)))
 	   ("Notion-Version" . ,org-notion-version))))
     (url-retrieve (concat org-notion-endpoint "users") (lambda (_status) (switch-to-buffer (current-buffer))))))
 
 (defun org-notion-search (query &optional params)
-  "Search the Notion workspace using QUERY and optional PARAMS")
+  "Search the Notion workspace using QUERY and optional PARAMS"
+  (interactive)
+  (let ((query query)
+	(url-request-method "POST")
+	(url-request-extra-headers
+	 `(("Authorization" . ,(concat "Bearer " (org-notion-find-token)))
+	   ("Notion-Version" . ,org-notion-version)))
+	(url-request-data (json-encode (list :query query))))
+    (url-retrieve (concat org-notion-endpoint "search") (lambda (_status) (with-current-buffer (current-buffer) (message "success"))))))
 
 (provide 'org-notion)
 ;;; org-notion.el ends here
