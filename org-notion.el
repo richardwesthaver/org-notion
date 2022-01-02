@@ -24,11 +24,12 @@
 ;; 
 ;;; Code:
 (require 'auth-source)
+
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an `auth-source' entry.")
 
 (defconst org-notion-endpoint (format "https://%s/v1/" org-notion-host)
-  "URL of Notion API endpoint")
+  "URI of Notion API endpoint")
 
 (defconst org-notion-version "2021-08-16"
   "Notion API Version")
@@ -48,9 +49,27 @@ interactive prompt if token isn't found."
   "Notion integration token used to authenticate requests.
 You can generate one at URL `https://www.notion.so/my-integrations'.")
 
-(defvar org-notion-page-size 100
+(defcustom org-notion-page-size 100
   "Default count of results returned by Notion. Additional calls
-will be made to collect all results using the 'start_cursor' parameter. Maximum value is 100.")
+will be made to collect all results using the 'start_cursor' parameter. Maximum value is 100."
+  :type 'integer
+  :group 'org-notion)
+
+(defcustom org-notion-project-dirs (list org-directory)
+  "List of directories to sync with Notion.so counterparts."
+  :type 'list
+  :group 'org-notion)
+
+(defvar org-notion-push-hook nil "")
+(defvar org-notion-pull-hook nil "")
+
+;;; Errors
+(define-error 'org-notion-err nil)
+(define-error 'org-notion--not-found "resource not found!" 'org-notion-err)
+(define-error 'org-notion--req-limit "req-limit reached. slow down!" 'org-notion-err)
+(define-error 'org-notion--ser-err "encountered error during serialization." 'org-notion-err)
+(define-error 'org-notion--de-err "encountered error during deserialization." 'org-notion-err)
+(define-error 'org-notion--auth-err "encountered error during authentication." 'org-notion-err)
 
 ;; RESEARCH 2021-12-28: auth-source secret const function security reccs
 (defun org-notion-find-token (&optional token)
@@ -60,9 +79,13 @@ first. If 'nil' or token is missing, prompt for token."
   (when (and org-notion-use-auth-source
 	     (not org-notion-token))
     ;; TODO 2021-12-28: add default user/host/port with let*
-      (let ((found (nth 0 (auth-source-search
+    (let ((auth-source-creation-defaults '((user . "org-notion")
+					   (host . org-notion-host)
+					   (port . "443")))
+	  (found (nth 0 (auth-source-search
 			   :max 1
 			   :host org-notion-host
+			   :port "443"
 			   :require '(:secret)
 			   :create t))))
 	(setq org-notion-token (when found
@@ -71,7 +94,8 @@ first. If 'nil' or token is missing, prompt for token."
 				       (funcall sec)
 				     sec))))))
   (unless org-notion-use-auth-source
-    (setq org-notion-token (or token (read-passwd "Notion API Token: "))))
+    (setq org-notion-token (or token
+			       (read-passwd "Notion API Token: "))))
   org-notion-token)
   
 (defun org-notion-get-current-user ()
@@ -95,8 +119,8 @@ enabled."
 	   ("Notion-Version" . ,org-notion-version))))
     (url-retrieve (concat org-notion-endpoint "users") (lambda (_status) (switch-to-buffer (current-buffer))))))
 
-(defun org-notion-search (query &optional params)
-  "Search the Notion workspace using QUERY and optional PARAMS"
+(defun org-notion-search (query)
+  "Search the Notion workspace using QUERY"
   (interactive)
   (let ((query query)
 	(url-request-method "POST")
