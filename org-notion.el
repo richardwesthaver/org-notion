@@ -65,11 +65,12 @@ will be made to collect all results using the 'start_cursor' parameter. Maximum 
 
 ;;; Errors
 (define-error 'org-notion-err nil)
-(define-error 'org-notion--not-found "resource not found!" 'org-notion-err)
-(define-error 'org-notion--req-limit "req-limit reached. slow down!" 'org-notion-err)
-(define-error 'org-notion--ser-err "encountered error during serialization." 'org-notion-err)
-(define-error 'org-notion--de-err "encountered error during deserialization." 'org-notion-err)
-(define-error 'org-notion--auth-err "encountered error during authentication." 'org-notion-err)
+(define-error 'org-notion-err--api nil 'org-notion-err)
+(define-error 'org-notion--not-found "Resource not found" 'org-notion-err--api)
+(define-error 'org-notion--rate-limit "Req-limit reached -- slow down" 'org-notion-err--api)
+(define-error 'org-notion--ser-err "Encountered error during serialization" 'org-notion-err)
+(define-error 'org-notion--de-err "Encountered error during deserialization" 'org-notion-err)
+(define-error 'org-notion--auth-err "Encountered error during authentication" 'org-notion-err)
 
 ;; RESEARCH 2021-12-28: auth-source secret const function security reccs
 (defun org-notion-find-token (&optional token)
