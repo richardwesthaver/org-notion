@@ -83,11 +83,10 @@ first. If 'nil' or token is missing, prompt for token."
 					   (host . org-notion-host)
 					   (port . "443")))
 	  (found (nth 0 (auth-source-search
-			   :max 1
-			   :host org-notion-host
-			   :port "443"
-			   :require '(:secret)
-			   :create t))))
+			 :host org-notion-host
+			 :max 1
+			 :require '(:secret)
+			 :create t))))
 	(setq org-notion-token (when found
 				 (let ((sec (plist-get found :secret)))
 				   (if (functionp sec)
