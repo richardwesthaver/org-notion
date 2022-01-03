@@ -26,22 +26,22 @@
 (require 'org-notion)
 (require 'ert)
 
+;; TODO 2022-01-02:
+(defun org-notion-mock-auth ()
+  "create a fake `auth-source' for testing"
+  nil)
+
 (ert-deftest org-notion-version-ok ()
   (should (equal org-notion-version "2021-08-16")))
 
 (ert-deftest org-notion-no-auth-source-ok ()
   (let ((org-notion-use-auth-source nil))
-    (org-notion-find-token "token-test")
-    (should (equal org-notion-token "token-test"))
-    (setq org-notion-token nil)))
+    (should (org-notion-token "token-test"))))
 
-;; currently requires ~/.authinfo.gpg
-;; RESEARCH 2021-12-31: how to test with a temporary auth-source
+;; FIXME 2022-01-02: currently requires ~/.authinfo.gpg
 (ert-deftest org-notion-auth-source-ok ()
   (let ((org-notion-use-auth-source t))
-    (org-notion-find-token)
-    (should org-notion-token)
-    (setq org-notion-token nil)))
+    (should org-notion-token)))
 
 (ert-deftest org-notion-current-user-ok ()
   (should (org-notion-get-current-user)))
