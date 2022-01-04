@@ -23,12 +23,12 @@
 ;; tests for org-notion.el
 ;;
 ;;; Code:
-(require 'org-notion)
+(require 'org-notion (expand-file-name "../org-notion.el"))
 (require 'ert)
 
 ;; TODO 2022-01-02:
 (defun org-notion-mock-auth ()
-  "create a fake `auth-source' for testing"
+  "create a fake `auth-source-secret' for testing"
   nil)
 
 (ert-deftest org-notion-version-ok ()
@@ -41,7 +41,7 @@
 ;; FIXME 2022-01-02: currently requires ~/.authinfo.gpg
 (ert-deftest org-notion-auth-source-ok ()
   (let ((org-notion-use-auth-source t))
-    (should org-notion-token)))
+    (should (org-notion-token))))
 
 (ert-deftest org-notion-current-user-ok ()
   (should (org-notion-get-current-user)))
