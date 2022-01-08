@@ -31,12 +31,20 @@
   "create a fake `auth-source-secret' for testing"
   nil)
 
-(ert-deftest org-notion-version-ok ()
-  (should (equal org-notion-version "2021-08-16")))
+(ert-deftest org-notion-to-org-time-ok ()
+  (should (equal (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 03:59:15")))
+
+(ert-deftest org-notion-from-org-time-ok ()
+  (should (equal (org-notion-from-org-time "2022-01-09 03:59:15") "2022-01-09T08:59:15+0000")))
+
+(ert-deftest org-notion-const-ok ()
+  (should (equal org-notion-version "2021-08-16"))
+  (should (equal org-notion-host "api.notion.com"))
+  (should (equal org-notion-endpoint "https://api.notion.com/v1/")))
 
 (ert-deftest org-notion-no-auth-source-ok ()
   (let ((org-notion-use-auth-source nil))
-    (should (org-notion-token "token-test"))))
+    (should (equal (org-notion-token "token-test") "token-test"))))
 
 ;; FIXME 2022-01-02: currently requires ~/.authinfo.gpg
 (ert-deftest org-notion-auth-source-ok ()

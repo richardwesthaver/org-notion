@@ -1,6 +1,8 @@
 #+TITLE: org-notion
+#+DATE: 2022-01-07
 #+DESCRIPTION: Notion.so Org-mode Extension
-#+AUTHOR: ellis <ellis@rwest.io>
+#+AUTHOR: ellis
+#+EMAIL: ellis@rwest.io
 
 [[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for notes. It is a very powerful
 text-based system for organizing your life in plaintext.
@@ -65,3 +67,9 @@ with =(setq org-notion-check-auth-source nil)=.
 * COMMENT notes
 - set ID property to notion ID - both use UUIDv4
   - [[help:thing-at-point-uuid-regexp]]
+#+begin_comment
+Local variables:
+mode: org
+time-stamp-pattern: "4/#\\+DATE: %Y-%02m-%02d$"
+end:
+#+end_comment
