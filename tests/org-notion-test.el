@@ -26,18 +26,13 @@
 (require 'org-notion (expand-file-name "../org-notion.el"))
 (require 'ert)
 
-;; TODO 2022-01-02:
-(defun org-notion-mock-auth ()
-  "create a fake `auth-source-secret' for testing"
-  nil)
-
 (ert-deftest org-notion-to-org-time-ok ()
   (should (equal (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 03:59:15")))
 
 (ert-deftest org-notion-from-org-time-ok ()
   (should (equal (org-notion-from-org-time "2022-01-09 03:59:15") "2022-01-09T08:59:15+0000")))
 
-(ert-deftest org-notion-const-ok ()
+(ert-deftest org-notion-consts-ok ()
   (should (equal org-notion-version "2021-08-16"))
   (should (equal org-notion-host "api.notion.com"))
   (should (equal org-notion-endpoint "https://api.notion.com/v1/")))
@@ -59,6 +54,9 @@
 
 (ert-deftest org-notion-search-ok ()
   (should (org-notion-search "org-notion")))
+
+;; Org-mode parsing tests
+(ert-deftest org-notion--parse-id-ok ())
 
 (provide 'org-notion-test)
 ;;; org-notion-test.el ends here

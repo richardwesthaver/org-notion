@@ -1,0 +1,14 @@
+#+TITLE: hello
+#+NOTION_ID: global-test
+
+test test
+
+* org-notion
+:PROPERTIES:
+:NOTION_ID: 64adb50d17394203a31265641aeaeb8e
+:END:
+
+* org-notion
+:PROPERTIES:
+:NOTION_ID: testing
+:END:

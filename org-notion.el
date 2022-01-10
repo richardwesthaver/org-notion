@@ -21,14 +21,39 @@
 
 ;;; Commentary:
 
-;; org-notion is a simple package that uses this API to integrate the
-;; beauty of Notion with your Org-mode workflow.
-
+;; org-notion is a simple package that integrates the beauty and
+;; convenience of Notion.so with your Org-mode workflow. 
 ;; 
+;; Many moons ago I used Notion.so as a notes and collaboration tool
+;; for work. It's easy to use and is (in my opinion) the best
+;; web-based solution out there. I have always used Org-mode for
+;; personal ventures of course, but it is a pain to integrate with
+;; non-tech folks. Even tech folks will roll their eyes if your
+;; company-hosted repo has a README.org instead of the tried and true
+;; README.md. I decided to abandon Notion.so because I couldn't wait
+;; for the overdue official API to be released, and was unsatisfied
+;; with the unofficial variants. Nowadays, that story has changed. As
+;; of 2021 the official API is available and ready for action.
+;; 
+;; This package wraps the full Notion.so API with support for all web
+;; requests and object types. The requests are dispatched
+;; asynchronously via the `org-notion-call' function which returns an
+;; EIEIO class instance based on the CALLBACK arg. This is the
+;; low-level interface which can be hacked to your liking.
+;;
+;; The Org-mode integration is achieved with the help of the
+;; `org-element' functions which translate Org syntax to Notion.so
+;; rich text objects and vice-versa. An `org-notion-mode' minor-mode
+;; is provided for interacting with the API from auto-loaded functions
+;; and custom properties are used to keep headlines/files in sync with
+;; their Notion.so counterparts.
+
 ;;; Code:
+(require 'eieio)
 (require 'auth-source)
 (require 'json)
 (require 'url)
+
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an entry with
 `auth-source-secrets-create'.")
@@ -38,6 +63,29 @@
 
 (defconst org-notion-version "2021-08-16"
   "Notion API Version")
+
+(defconst org-notion--block-types '(paragraph heading_1 heading_2
+  heading_3 bulleted_list_item numbered_list_item to_do toggle
+  child_page child_database embed image video file pdf bookmark
+  callout quote equation divider table_of_contents column
+  column_list link_preview synced_block template link_to_page
+  unsupported)
+  "Type of blocks available for Notion API, used by
+`org-notion-block' object. 'unsupported' refers to an unsupported
+block type.")
+
+(defconst org-notion--annotation-types '(bold italic strikethrough
+  underline code)
+  "Annotations available for Notion API text objects, used by
+`org-notion-rich-text' object.")
+
+(defconst org-notion--color-types '(default gray brown orange
+  yellow green blue purple pink red gray_background
+  brown_background orange_background yellow_background
+  green_background blue_background purple_background
+  pink_background red_background)
+  "Colors available for Notion API text objects, used by
+`org-notion-rich-text' object.")
 
 (defgroup org-notion nil
   "Customization group for org-notion."
@@ -71,6 +119,9 @@ parameter. Maximum value is 100."
   :type 'hook
   :group 'org-notion)
 
+(defvar org-notion-id-property "NOTION_ID"
+  "Name of NOTION_ID Org-mode property.")
+
 (defvar org-notion-page-list nil
   "List of Notion.so pages.")
 
@@ -85,83 +136,10 @@ parameter. Maximum value is 100."
 
 (make-variable-buffer-local 'org-notion-buffer-kill-prompt)
 
-(defvar org-notion--block-types
-  '("paragraph"
-    "heading_1"
-    "heading_2"
-    "heading_3"
-    "bulleted_list_item"
-    "numbered_list_item"
-    "to_do"
-    "toggle"
-    "child_page"
-    "child_database"
-    "embed"
-    "image"
-    "video"
-    "file"
-    "pdf"
-    "bookmark"
-    "callout"
-    "quote"
-    "equation"
-    "divider"
-    "table_of_contents"
-    "column"
-    "column_list"
-    "link_preview"
-    "synced_block"
-    "template"
-    "link_to_page"
-    "unsupported")
-  "Type of blocks available for Notion API, used by
-`org-notion-block' object. 'unsupported' refers to an unsupported
-block type.")
-
-(defvar org-notion--annotation-types
-  '("bold"
-    "italic"
-    "strikethrough"
-    "underline"
-    "code")
-  "Annotations available for Notion API text objects, used
-by `org-notion-rich-text' object.")
-
-(defvar org-notion--color-types
-  '("default"
-    "gray"
-    "brown"
-    "orange"
-    "yellow"
-    "green"
-    "blue"
-    "purple"
-    "pink"
-    "red"
-    "gray_background"
-    "brown_background"
-    "orange_background"
-    "yellow_background"
-    "green_background"
-    "blue_background"
-    "purple_background"
-    "pink_background"
-    "red_background")
-  "Colors available for Notion API text objects, used by
-`org-notion-rich-text' object.")
-
 ;;; Errors
 (defvar org-notion-verbosity 'debug)
-
-(define-error 'org-notion-err nil)
-(define-error 'org-notion-err--api nil 'org-notion-err)
-(define-error 'org-notion--not-found "Resource not found" 'org-notion-err--api)
-(define-error 'org-notion--rate-limit "Req-limit reached -- slow down" 'org-notion-err--api)
-(define-error 'org-notion--ser-err "Encountered error during serialization" 'org-notion-err)
-(define-error 'org-notion--de-err "Encountered error during deserialization" 'org-notion-err)
-(define-error 'org-notion--auth-err "Encountered error during authentication" 'org-notion-err)
-
-(defun org-notion-log (s) (when (eq 'debug org-notion-verbosity) (message "%s" s)))
+(defun org-notion-log (s)
+  (when (eq 'debug org-notion-verbosity) (message "%s" s)))
 
 ;;; EIEIO
 (defclass org-notion-object ()
@@ -376,7 +354,9 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
 	   ("Notion-Version" . ,org-notion-version))))
     (url-retrieve (concat org-notion-endpoint "users/me")
 		  (lambda (_status)
-		    (switch-to-buffer (current-buffer))))))
+		    (with-current-buffer (current-buffer)
+		    (search-forward "\n\n")
+		    (message "%s" (alist-get 'id (json-read))))))))
 
 (defun org-notion-get-users ()
   "Get all users in the Notion workspace. This will return a 403
@@ -403,6 +383,21 @@ enabled."
     (url-retrieve (concat org-notion-endpoint "search")
 		  (lambda (_status)
 		    (with-current-buffer (current-buffer) (message "success"))))))
+
+;;; Org-mode
+(defun org-notion-id-at-point (&optional pom)
+  "Get the value of `org-notion-id-property' key closest to POM."
+  (or (cdr (assoc org-notion-id-property (org-entry-properties)))
+      (cadr (assoc org-notion-id-property (org-collect-keywords `(,org-notion-id-property))))))
+
+;;;###autoload
+(defun org-notion-open ()
+  "Open the Notion.so page attached to this heading or file in
+browser. Requires `org-notion-id-property' key to be set."
+  (interactive)
+  (let ((notion-id (org-notion-id-at-point)))
+    (if notion-id (browse-url (format "https://www.notion.so/%s" notion-id))
+      (message "failed to find %s property" org-notion-id-property))))
 
 (provide 'org-notion)
 ;;; org-notion.el ends here
