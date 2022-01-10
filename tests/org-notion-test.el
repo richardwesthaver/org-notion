@@ -26,23 +26,17 @@
 (require 'org-notion (expand-file-name "../org-notion.el"))
 (require 'ert)
 
-(ert-deftest org-notion-to-org-time-ok ()
-  (should (equal (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 03:59:15")))
-
-(ert-deftest org-notion-from-org-time-ok ()
-  (should (equal (org-notion-from-org-time "2022-01-09 03:59:15") "2022-01-09T08:59:15+0000")))
-
 (ert-deftest org-notion-consts-ok ()
   (should (equal org-notion-version "2021-08-16"))
   (should (equal org-notion-host "api.notion.com"))
   (should (equal org-notion-endpoint "https://api.notion.com/v1/")))
 
-(ert-deftest org-notion-no-auth-source-ok ()
+(ert-deftest org-notion-token--no-auth-source-ok ()
   (let ((org-notion-use-auth-source nil))
     (should (equal (org-notion-token "token-test") "token-test"))))
 
 ;; FIXME 2022-01-02: currently requires ~/.authinfo.gpg
-(ert-deftest org-notion-auth-source-ok ()
+(ert-deftest org-notion-token--auth-source-ok ()
   (let ((org-notion-use-auth-source t))
     (should (org-notion-token))))
 
@@ -55,8 +49,20 @@
 (ert-deftest org-notion-search-ok ()
   (should (org-notion-search "org-notion")))
 
-;; Org-mode parsing tests
-(ert-deftest org-notion--parse-id-ok ())
+;; Org-mode tests
+(ert-deftest org-notion-to-org-time-ok ()
+  (set-time-zone-rule t)
+  (should (string= (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 03:59:15")))
+
+(ert-deftest org-notion-from-org-time-ok ()
+  (should (string= (org-notion-from-org-time "2022-01-09 03:59:15") "2022-01-09T08:59:15+0000")))
+
+(ert-deftest org-notion-id-at-point-ok ()
+  (with-temp-buffer
+    (insert-file-contents "mock.org")
+    (let ((id "global-test")
+	  (pom (point-min)))
+      (should (equal (org-notion-id-at-point pom) id)))))
 
 (provide 'org-notion-test)
 ;;; org-notion-test.el ends here

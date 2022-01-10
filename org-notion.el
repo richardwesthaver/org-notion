@@ -87,6 +87,10 @@ block type.")
   "Colors available for Notion API text objects, used by
 `org-notion-rich-text' object.")
 
+(defconst org-notion--mention-types '(user page database date link_preview)
+  "Mention types available for Notion API text objects, used by
+  `org-notion-rich-text' object.")
+
 (defgroup org-notion nil
   "Customization group for org-notion."
   :tag "Org Notion"
@@ -172,45 +176,6 @@ allow access to email addresses.")
   "Notion.so user object - can be a real person or a
 bot. Identified by the `:id' slot.")
 
-(defclass org-notion-block (org-notion-object)
-  ((type :initarg :type :type string
-	 :documentation "Type of block. See variable
-	 `org-notion--block-types' for possible values.")
-   (created :initarg :created
-	    :documentation "Datetime when this block was
-	    created.")
-   (updated :initarg :updated
-	    :documentation "Datetime when this block was last
-	    updated.")
-   (archived :initarg :archived :type boolean
-	     :documentation "The archived status of the block.")
-   (has_children :initarg :has_children :type boolean
-		 :documentation "Whether or not the block has
-		 children blocks nested within it."))
-  "Notion.so block object - identified by the `:id' slot.")
-
-(defclass org-notion-page (org-notion-object)
-  ((created :initarg :created
-	    :documentation "Datetime when this page was
-	    created.")
-   (updated :initarg :updated
-	    :documentation "Datetime when this page was
-	    updated.")
-   (archived :initarg :archived
-	     :documentation "The archived status of the page.")
-   (icon :initarg :icon
-	 :documentation "Page icon.")
-   (cover :initarg :cover
-	  :documentation "Page cover image.")
-   (properties :initarg :properties
-	       :documentation "Property values of this page.")
-   (parent :initarg :parent
-	   :documentation "The parent of this page. Can be a
-	   database, page, or workspace.")
-   (url :initarg :url
-	:documentation "The URL of the Notion page."))
-  "Notion.so page object - identified by the `:id' slot.")
-
 (defclass org-notion-database (org-notion-object)
   ((created :initarg :created
 	    :documentation "Datetime when this database was
@@ -234,6 +199,45 @@ bot. Identified by the `:id' slot.")
    (url :initarg :url
 	:documentation "The URL of the Notion database."))
   "Notion.so database object - identified by the `:id' slot.")
+
+(defclass org-notion-page (org-notion-object)
+  ((created :initarg :created
+	    :documentation "Datetime when this page was
+	    created.")
+   (updated :initarg :updated
+	    :documentation "Datetime when this page was
+	    updated.")
+   (archived :initarg :archived
+	     :documentation "The archived status of the page.")
+   (icon :initarg :icon
+	 :documentation "Page icon.")
+   (cover :initarg :cover
+	  :documentation "Page cover image.")
+   (properties :initarg :properties
+	       :documentation "Property values of this page.")
+   (parent :initarg :parent
+	   :documentation "The parent of this page. Can be a
+	   database, page, or workspace.")
+   (url :initarg :url
+	:documentation "The URL of the Notion page."))
+  "Notion.so page object - identified by the `:id' slot.")
+
+(defclass org-notion-block (org-notion-object)
+  ((type :initarg :type :type string
+	 :documentation "Type of block. See variable
+	 `org-notion--block-types' for possible values.")
+   (created :initarg :created
+	    :documentation "Datetime when this block was
+	    created.")
+   (updated :initarg :updated
+	    :documentation "Datetime when this block was last
+	    updated.")
+   (archived :initarg :archived :type boolean
+	     :documentation "The archived status of the block.")
+   (has_children :initarg :has_children :type boolean
+		 :documentation "Whether or not the block has
+		 children blocks nested within it."))
+  "Notion.so block object - identified by the `:id' slot.")
 
 (defclass org-notion-rich-text ()
   ((type :initarg :type :type string :required t
@@ -280,9 +284,9 @@ of type 'text'")
 (defclass org-notion-request ()
   ((token :initform (org-notion-token) :initarg :token :required t :allocation :class
 	  :documentation "Bearer token used to authenticate requests.")
-   (version :initform org-notion-version :initarg :version :required t :allocation :class
+   (version :initform (eval org-notion-version) :initarg :version :required t :allocation :class
 	    :documentation "Notion.so API Version.")
-   (endpoint :initform org-notion-endpoint :inittarg :endpoint :required t :allocation :class
+   (endpoint :initform (eval org-notion-endpoint) :inittarg :endpoint :required t
 	     :documentation "Notion.so API endpoint.")
    (data :initarg :data
 	 :documentation "Payload to be sent with HTTP request."))
@@ -343,7 +347,12 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
   (json-read))
 
 (defun org-notion-call (method callback &rest params)
-  "Call the Notion.so API with METHOD, then CALLBACK with supplied PARAMS.")
+  "Call the Notion.so API with METHOD, then CALLBACK with supplied PARAMS."
+  (cl-case (intern method)
+    ('current-user (org-notion-get-current-user))
+    ('users (org-notion-get-users))
+    ('search (org-notion-search params))))
+
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
 `org-notion-token'"
@@ -386,17 +395,22 @@ enabled."
 
 ;;; Org-mode
 (defun org-notion-id-at-point (&optional pom)
-  "Get the value of `org-notion-id-property' key closest to POM."
-  (or (cdr (assoc org-notion-id-property (org-entry-properties)))
-      (cadr (assoc org-notion-id-property (org-collect-keywords `(,org-notion-id-property))))))
+  "Get the value of `org-notion-id-property' property key. Checks
+headline at POM first, then buffer keywords."
+  (org-with-point-at pom
+    (or (cdr (assoc org-notion-id-property
+		    (org-entry-properties)))
+	(cadr (assoc org-notion-id-property
+		     (org-collect-keywords `(,org-notion-id-property)))))))
 
 ;;;###autoload
-(defun org-notion-open ()
-  "Open the Notion.so page attached to this heading or file in
-browser. Requires `org-notion-id-property' key to be set."
+(defun org-notion-browse (&optional pom)
+  "Open the Notion.so page attached to the heading or file nearest
+POM in browser. Requires `org-notion-id-property' key to be set."
   (interactive)
-  (let ((notion-id (org-notion-id-at-point)))
-    (if notion-id (browse-url (format "https://www.notion.so/%s" notion-id))
+  (let ((notion-id (org-notion-id-at-point pom)))
+    (if notion-id
+	(browse-url (format "https://www.notion.so/%s" notion-id))
       (message "failed to find %s property" org-notion-id-property))))
 
 (provide 'org-notion)
