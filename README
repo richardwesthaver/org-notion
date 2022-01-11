@@ -11,7 +11,7 @@ text-based system for organizing your life in plaintext.
 platforms and has some cool features including databases, realtime
 collaboration, and as of 2021 an [[https://developers.notion.com/][official API]].
 
-=org-notion= is a simple package that uses this API to integrate the
+=org-notion= is an Emacs package that uses this API to integrate the
 beauty of Notion with your Org-mode workflow.
 
 * Installation
@@ -59,9 +59,10 @@ with =(setq org-notion-check-auth-source nil)=.
 - Emacs
   - [[https://www.gnu.org/software/emacs/manual/html_mono/url.html][url]]
   - [[https://www.gnu.org/software/emacs/manual/html_node/elisp/Parsing-JSON.html][parsing json]]
-  - [[https://github.com/doublep/eldev][eldev]]
   - [[https://www.gnu.org/software/emacs/manual/html_node/ert/index.html][ert]]
+  - [[https://www.gnu.org/software/emacs/manual/html_node/eieio/][eieio]]
 - Prior Art
+  - [[https://github.com/ahungry/org-jira][ahungry/org-jira]]
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
 
 * COMMENT notes

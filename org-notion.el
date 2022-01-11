@@ -146,12 +146,28 @@ parameter. Maximum value is 100."
   (when (eq 'debug org-notion-verbosity) (message "%s" s)))
 
 ;;; EIEIO
-(defclass org-notion-object ()
+(defclass org-notion-class nil
+  nil
+  "Default superclass inherited by `org-notion' classes."
+  :abstract "Class org-notion-class is abstract.
+use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create instances.")
+
+(cl-defmethod org-notion-obj-dump ((obj org-notion-class))
+  "Pretty-print EIEIO class objects as string."
+  (let ((slots (mapcar (lambda (slot) (aref slot 1)) (eieio-class-slots (eieio-object-class obj)))))
+    (setq slots (cl-remove-if (lambda (s) (not (slot-boundp obj s))) slots))
+    (apply #'concat
+	   (mapcar (lambda (slot)
+		     (let ((slot (intern (pp-to-string slot))))
+		       (format "%+4s:   %s\n" slot (slot-value obj (intern (pp-to-string slot))))))
+		   slots))))
+
+(defclass org-notion-object (org-notion-class)
   ((id :initarg :id :type string :required t
        :documentation "UUID v4 associated with this object")
    (object :initarg :object :type string :required t
-	   :documentation "one of: 'page', 'database', 'block',
-	   or 'user'"))
+	   :documentation "one of: 'page', 'database', 'block', or 'user'")
+   (data :initarg :data :documentation "alist of JSON data."))
   "Top-level class for Notion API objects.")
 
 (defclass org-notion-user (org-notion-object)
@@ -164,8 +180,8 @@ either 'person' or 'bot'.")
 	   :documentation "Chosen avatar image.")
    (email :initarg :email :type (or null string)
 	  :documentation "Email address of a user. Only present
-if `:type' is 'person' and integration has user capabilities that
-allow access to email addresses.")
+	  if `:type' is 'person' and integration has user
+	  capabilities that allow access to email addresses.")
    (owner-type :initarg :owner-type :type (or nil string)
 	       :documentation "The type of owner -- either
 	       'workspace' or 'user'")
@@ -239,7 +255,7 @@ bot. Identified by the `:id' slot.")
 		 children blocks nested within it."))
   "Notion.so block object - identified by the `:id' slot.")
 
-(defclass org-notion-rich-text ()
+(defclass org-notion-rich-text (org-notion-class)
   ((type :initarg :type :type string :required t
 	 :documentation "Type of this rich text object. Possible
 	 values are: 'text', 'mention', 'equation'")
@@ -281,7 +297,7 @@ of type 'text'")
 	       :documentation "The LaTeX string representing this inline equation."))
   "Notion.so inline equation object found in `org-notion-rich-text' of type 'equation'.")
 
-(defclass org-notion-request ()
+(defclass org-notion-request (org-notion-class)
   ((token :initform (org-notion-token) :initarg :token :required t :allocation :class
 	  :documentation "Bearer token used to authenticate requests.")
    (version :initform (eval org-notion-version) :initarg :version :required t :allocation :class
