@@ -1,14 +1,7 @@
-#+TITLE: hello
-#+NOTION_ID: global-test
+#+TITLE: org-notion
+#+NOTION_ID: 64adb50d17394203a31265641aeaeb8e
 
-test test
-
-* org-notion
+* mock
 :PROPERTIES:
-:NOTION_ID: 64adb50d17394203a31265641aeaeb8e
-:END:
-
-* org-notion
-:PROPERTIES:
-:NOTION_ID: testing
+:NOTION_ID: d346435755554b30bc473a4538c1c2a8
 :END:
