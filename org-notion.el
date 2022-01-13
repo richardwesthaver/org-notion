@@ -298,12 +298,14 @@ of type 'text'")
   "Notion.so inline equation object found in `org-notion-rich-text' of type 'equation'.")
 
 (defclass org-notion-request (org-notion-class)
-  ((token :initform (org-notion-token) :initarg :token :required t :allocation :class
+  ((token :initform #'org-notion-token :initarg :token :required t :allocation :class
 	  :documentation "Bearer token used to authenticate requests.")
    (version :initform (eval org-notion-version) :initarg :version :required t :allocation :class
 	    :documentation "Notion.so API Version.")
    (endpoint :initform (eval org-notion-endpoint) :inittarg :endpoint :required t
 	     :documentation "Notion.so API endpoint.")
+   (method :initform "GET" :initarg :method :required t
+	   :documentation "HTTP Method to use.")
    (data :initarg :data
 	 :documentation "Payload to be sent with HTTP request."))
   "Notion.so API request.")
@@ -362,12 +364,48 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
   (decode-coding-region (point) (point-max) org-notion-coding-system)
   (json-read))
 
-(defun org-notion-call (method callback &rest params)
-  "Call the Notion.so API with METHOD, then CALLBACK with supplied PARAMS."
-  (cl-case (intern method)
-    ('current-user (org-notion-get-current-user))
-    ('users (org-notion-get-users))
-    ('search (org-notion-search params))))
+(defun org-notion--api-error ()
+  "Propagate an error message returned from Notion API.")
+
+(defun org-notion-call (call &optional target callback &rest params)
+  "Call the Notion.so API with CALL and optional TARGET, then evaluate CALLBACK with supplied PARAMS."
+  (with-slots (token version endpoint method data)
+      (org-notion-request)
+    (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
+				       ("Notion-Version" . ,version)
+				       ("Content-Type" . "application/json"))))
+      (cl-case call
+	('current-user (let ((url-request-method "GET")
+			     (url (concat endpoint "users/me")))
+			 (url-retrieve url (lambda (_)
+					     (with-current-buffer (current-buffer)
+					       (search-forward "\n\n")
+					       (print (json-read)))))))
+	('users (let ((url-request-method "GET")
+		      (url (concat endpoint "users")))
+		  (url-retrieve url (lambda (_)
+				      (with-current-buffer (current-buffer)
+					(search-forward "\n\n")
+					(print (json-read)))))))
+	;; TODO 2022-01-12: if ID, just concat, if name or email,
+	;; do a lookup in `org-notion-users', else error and prompt
+	;; user to use 'users call.
+	('user (let ((url-request-method "GET")
+		     (url (concat endpoint (format "users/%s" target))))
+		 (url-retrieve url (lambda (_)
+				     (with-current-buffer (current-buffer)
+				       (search-forward "\n\n")
+				       (print (json-read)))))))
+	('search (let ((url-request-method "POST")
+		       (url (concat endpoint "search"))
+		       (url-request-data (json-encode `(:query ,target))))
+		   (url-retrieve url (lambda (_)
+				       (with-current-buffer (current-buffer)
+					 (search-forward "\n\n")
+					 (print (json-read)))))))
+	('database ())
+	('page ())
+	('block ())))))
 
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
@@ -380,8 +418,8 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
     (url-retrieve (concat org-notion-endpoint "users/me")
 		  (lambda (_status)
 		    (with-current-buffer (current-buffer)
-		    (search-forward "\n\n")
-		    (message "%s" (alist-get 'id (json-read))))))))
+		      (search-forward "\n\n")
+		      (message "%s" (alist-get 'id (json-read))))))))
 
 (defun org-notion-get-users ()
   "Get all users in the Notion workspace. This will return a 403
