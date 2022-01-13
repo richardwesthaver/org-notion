@@ -52,15 +52,16 @@
 ;; Org-mode tests
 (ert-deftest org-notion-to-org-time-ok ()
   (set-time-zone-rule t)
-  (should (string= (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 03:59:15")))
+  (should (string= (org-notion-to-org-time "2022-01-09T08:59:15.000Z") "2022-01-09 08:59:15")))
 
 (ert-deftest org-notion-from-org-time-ok ()
-  (should (string= (org-notion-from-org-time "2022-01-09 03:59:15") "2022-01-09T08:59:15+0000")))
+  (set-time-zone-rule t)
+  (should (string= (org-notion-from-org-time "2022-01-09 08:59:15") "2022-01-09T08:59:15+0000")))
 
 (ert-deftest org-notion-id-at-point-ok ()
   (with-temp-buffer
     (insert-file-contents "mock.org")
-    (let ((id "global-test")
+    (let ((id "64adb50d17394203a31265641aeaeb8e")
 	  (pom (point-min)))
       (should (equal (org-notion-id-at-point pom) id)))))
 
