@@ -132,7 +132,7 @@ parameter. Maximum value is 100."
 (defvar org-notion-database-list nil
   "List of Notion.so databases.")
 
-(defvar org-notion-buffer-name "*org-notion-%s*"
+(defvar org-notion-proc-buffer (generate-new-buffer-name " *org-notion-proc-")
   "Name of the org-notion buffer.")
 
 (defvar org-notion-buffer-kill-prompt t
@@ -148,7 +148,7 @@ parameter. Maximum value is 100."
 ;;; EIEIO
 (defclass org-notion-class nil
   nil
-  "Default superclass inherited by `org-notion' classes."
+  :documentation "Default superclass inherited by `org-notion' classes."
   :abstract "Class org-notion-class is abstract.
 use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create instances.")
 
@@ -159,7 +159,7 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
     (apply #'concat
 	   (mapcar (lambda (slot)
 		     (let ((slot (intern (pp-to-string slot))))
-		       (format "%+4s:   %s\n" slot (slot-value obj (intern (pp-to-string slot))))))
+		       (format "\n%+4s:   %s" slot (slot-value obj (intern (pp-to-string slot))))))
 		   slots))))
 
 (defclass org-notion-object (org-notion-class)
@@ -168,7 +168,7 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
    (object :initarg :object :type string :required t
 	   :documentation "one of: 'page', 'database', 'block', or 'user'")
    (data :initarg :data :documentation "alist of JSON data."))
-  "Top-level class for Notion API objects.")
+  :documentation "Top-level class for Notion API objects.")
 
 (defclass org-notion-user (org-notion-object)
   ((type :initarg :type :type string
@@ -189,7 +189,7 @@ either 'person' or 'bot'.")
 	  :documentation "The owner of a bot user -- either
 	  nil, indicating 'workspace' is owner, or an
 	  `org-notion-user' object of `:type' 'person'."))
-  "Notion.so user object - can be a real person or a
+  :documentation "Notion.so user object - can be a real person or a
 bot. Identified by the `:id' slot.")
 
 (defclass org-notion-database (org-notion-object)
@@ -214,7 +214,7 @@ bot. Identified by the `:id' slot.")
 	   or workspace.")
    (url :initarg :url
 	:documentation "The URL of the Notion database."))
-  "Notion.so database object - identified by the `:id' slot.")
+  :documentation "Notion.so database object - identified by the `:id' slot.")
 
 (defclass org-notion-page (org-notion-object)
   ((created :initarg :created
@@ -236,7 +236,7 @@ bot. Identified by the `:id' slot.")
 	   database, page, or workspace.")
    (url :initarg :url
 	:documentation "The URL of the Notion page."))
-  "Notion.so page object - identified by the `:id' slot.")
+  :documentation "Notion.so page object - identified by the `:id' slot.")
 
 (defclass org-notion-block (org-notion-object)
   ((type :initarg :type :type string
@@ -253,7 +253,7 @@ bot. Identified by the `:id' slot.")
    (has_children :initarg :has_children :type boolean
 		 :documentation "Whether or not the block has
 		 children blocks nested within it."))
-  "Notion.so block object - identified by the `:id' slot.")
+  :documentation "Notion.so block object - identified by the `:id' slot.")
 
 (defclass org-notion-rich-text (org-notion-class)
   ((type :initarg :type :type string :required t
@@ -274,14 +274,14 @@ bot. Identified by the `:id' slot.")
 	  :documentation "Color that applies to this rich
 	  text. See `org-notion--color-types' for a list of
 	  possible values."))
-  "Notion.so rich text object.")
+  :documentation "Notion.so rich text object.")
 
 (defclass org-notion-inline-text (org-notion-rich-text)
   ((content :initarg :content :type string :required t
 	    :documentation "Text content.")
    (link :initarg :link :type string
 	 :documentation "Any inline link in this text."))
-  "Notion.so inline text object found in `org-notion-rich-text'
+  :documentation "Notion.so inline text object found in `org-notion-rich-text'
 of type 'text'")
 
 (defclass org-notion-inline-mention (org-notion-rich-text)
@@ -289,26 +289,43 @@ of type 'text'")
 		 :documentation "Type of the inline mention. See
 		 `org-notion--mention-types' for a list of
 		 possible values."))
-  "Notion.so inline mention object found in
+  :documentation "Notion.so inline mention object found in
 `org-notion-rich-text' of type 'mention'")
 
 (defclass org-notion-inline-equation (org-notion-rich-text)
   ((expression :initarg :expression :type string :required t
 	       :documentation "The LaTeX string representing this inline equation."))
-  "Notion.so inline equation object found in `org-notion-rich-text' of type 'equation'.")
+  :documentation "Notion.so inline equation object found in `org-notion-rich-text' of type 'equation'.")
 
 (defclass org-notion-request (org-notion-class)
-  ((token :initform #'org-notion-token :initarg :token :required t :allocation :class
+  ((token :initform #'org-notion-token :initarg :token :required t
 	  :documentation "Bearer token used to authenticate requests.")
-   (version :initform (eval org-notion-version) :initarg :version :required t :allocation :class
+   (version :initform (eval org-notion-version) :initarg :version :required t
 	    :documentation "Notion.so API Version.")
    (endpoint :initform (eval org-notion-endpoint) :inittarg :endpoint :required t
 	     :documentation "Notion.so API endpoint.")
    (method :initform "GET" :initarg :method :required t
 	   :documentation "HTTP Method to use.")
-   (data :initarg :data
-	 :documentation "Payload to be sent with HTTP request."))
-  "Notion.so API request.")
+   (data :initform nil :initarg :data :type (or null string)
+	 :documentation "Payload to be sent with HTTP request.")
+   (callback :initform nil :initarg :callback
+	     :documentation "Callback used to handle response from Notion API call."))
+  :documentation "Notion.so API request.")
+
+(cl-defgeneric org-notion-from-json (str)
+  "Interpret json STR as `org-notion-object'")
+
+(cl-defgeneric org-notion-to-json (obj)
+  "Interpret `org-notion-object' OBJ as json string.")
+
+(cl-defgeneric org-notion-from-org (str)
+  "Interrpret Org-mode STR as `org-notion-object'")
+
+(cl-defgeneric org-notion-to-org (obj)
+  "Interpret `org-notion-object' OBJ as Org-mode syntax.")
+
+(cl-defmethod org-notion-call (obj org-notion-request)
+  "Send HTTP request with slots from `org-notion-request' instance.")
 
 ;;; Authentication
 ;; RESEARCH 2021-12-28: auth-source secret const function security reccs
@@ -380,13 +397,13 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
 			 (url-retrieve url (lambda (_)
 					     (with-current-buffer (current-buffer)
 					       (search-forward "\n\n")
-					       (print (json-read)))))))
+					       (print (org-notion--json-read)))))))
 	('users (let ((url-request-method "GET")
 		      (url (concat endpoint "users")))
 		  (url-retrieve url (lambda (_)
 				      (with-current-buffer (current-buffer)
 					(search-forward "\n\n")
-					(print (json-read)))))))
+					(print (org-notion--json-read)))))))
 	;; TODO 2022-01-12: if ID, just concat, if name or email,
 	;; do a lookup in `org-notion-users', else error and prompt
 	;; user to use 'users call.
@@ -395,14 +412,14 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
 		 (url-retrieve url (lambda (_)
 				     (with-current-buffer (current-buffer)
 				       (search-forward "\n\n")
-				       (print (json-read)))))))
+				       (print (org-notion--json-read)))))))
 	('search (let ((url-request-method "POST")
 		       (url (concat endpoint "search"))
 		       (url-request-data (json-encode `(:query ,target))))
 		   (url-retrieve url (lambda (_)
 				       (with-current-buffer (current-buffer)
 					 (search-forward "\n\n")
-					 (print (json-read)))))))
+					 (print (org-notion--json-read)))))))
 	('database ())
 	('page ())
 	('block ())))))
@@ -445,7 +462,7 @@ enabled."
 	(url-request-data (json-encode (list :query query))))
     (url-retrieve (concat org-notion-endpoint "search")
 		  (lambda (_status)
-		    (with-current-buffer (current-buffer) (message "success"))))))
+		    (with-current-buffer (current-buffer) (switch-to-buffer (current-buffer) (message "success")))))))
 
 ;;; Org-mode
 (defun org-notion-id-at-point (&optional pom)
