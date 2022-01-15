@@ -25,7 +25,7 @@
 ;; convenience of Notion.so with your Org-mode workflow. 
 
 ;;; Code:
-(require 'eieio)
+(require 'eieio-base)
 (require 'auth-source)
 (require 'json)
 (require 'url)
@@ -33,9 +33,6 @@
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an entry with
 `auth-source-secrets-create'.")
-
-(defconst org-notion-endpoint (format "https://%s/v1/" org-notion-host)
-  "URI of Notion API endpoint")
 
 (defconst org-notion-version "2021-08-16"
   "Notion API Version")
@@ -107,8 +104,14 @@ parameter. Maximum value is 100."
   :type 'hook
   :group 'org-notion)
 
+(defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
+  "URI of Notion API endpoint")
+
 (defvar org-notion-id-property "NOTION_ID"
   "Name of NOTION_ID Org-mode property.")
+
+(defvar org-notion-uuid-regexp "\\<[[:xdigit:]]\\{8\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{12\\}\\>"
+  "A regular expression matching a UUID with or without hyphens.")
 
 (defvar org-notion-page-cache nil
   "List of Notion pages.")
@@ -142,6 +145,11 @@ parameter. Maximum value is 100."
   (when (eq 'debug org-notion-verbosity) (message "%s" s)))
 
 (define-error 'org-notion-error "Unknown org-notion error")
+
+(define-error 'org-notion-invalid-uuid "String is not a valid UUID" 'org-notion-error)
+(define-error 'org-notion-invalid-method "Invalid API method" 'org-notion-error)
+
+;; API Responses
 (define-error 'org-notion-bad-request "HTTP 400: Bad Request" 'org-notion-error)
 (define-error 'org-notion-unauthorized "HTTP 401: Unauthorized" 'org-notion-error)
 (define-error 'org-notion-restricted-resource "HTTP 403: Restricted Resource" 'org-notion-error)
@@ -449,8 +457,60 @@ slot.")
     API call."))
   :documentation "Notion.so API request.")
 
-(cl-defmethod org-notion-call (obj org-notion-request)
-  "Send HTTP request with slots from `org-notion-request' instance.")
+(defun org-notion-valid-uuid (str)
+  "Validate uuid STR and return it."
+  (if (and (stringp str)
+	   (string-match-p org-notion-uuid-regexp str))
+	   str
+	   (signal 'org-notion-invalid-uuid str)))
+
+(cl-defmethod org-notion-dispatch ((obj org-notion-request))
+  "Dispatch HTTP request with slots from `org-notion-request' OBJ instance."
+  (with-slots (token version endpoint method data callback) obj
+    (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
+				       ("Notion-Version" . ,version)
+				       ("Content-Type" . "application/json"))))
+      (pcase method
+	('search (let ((url-request-method "POST")
+		       (url (concat endpoint "search"))
+		       (url-request-data (if (stringp data) (json-encode `(:query ,data))
+					   data)))
+		   (url-retrieve url (lambda (_)
+				       (with-current-buffer (current-buffer)
+					 (search-forward "\n\n")
+					 (print (org-notion--json-read)))))))
+	('current-user (let ((url-request-method "GET")
+			     (url (concat endpoint "users/me")))
+			 (url-retrieve url (lambda (status)
+					     (if (plist-member status :error)
+						 (message (format "%d" (car (last (plist-get status :error)))))
+					       (message "200"))))))
+	;; TODO 2022-01-12: if ID, just concat, if name or email,
+	;; do a lookup in `org-notion-users', else error and prompt
+	;; user to use users method.
+	('user (let ((url-request-method "GET")
+		     (url (concat endpoint (format "users/%s" (org-notion-valid-uuid data)))))
+		 (url-retrieve url (lambda (_)
+				     (with-current-buffer (current-buffer)
+				       (search-forward "\n\n")
+				       (print (org-notion--json-read)))))))
+
+	('users (let ((url-request-method "GET")
+		      (url (concat endpoint "users")))
+		  (url-retrieve url (lambda (_)
+				      (with-current-buffer (current-buffer)
+					(search-forward "\n\n")
+					(print (org-notion--json-read)))))))
+	('database (let ((url-request-method "GET")
+			 (url (concat endpoint (format "databases/%s" (org-notion-valid-uuid data)))))
+		     (url-retrieve url callback)))
+	('page (let ((url-request-method "GET")
+		     (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
+		 (url-retrieve url callback)))
+	('block (let ((url-request-method "GET")
+		      (url (concat endpoint (format "blocks/%s" (org-notion-valid-uuid data)))))
+		  (url-retrieve url callback)))
+	(_ (signal 'org-notion-invalid-method method))))))
 
 ;;; Authentication
 ;; RESEARCH 2021-12-28: auth-source secret const function security reccs
