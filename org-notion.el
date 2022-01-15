@@ -23,30 +23,6 @@
 
 ;; org-notion is a simple package that integrates the beauty and
 ;; convenience of Notion.so with your Org-mode workflow. 
-;; 
-;; Many moons ago I used Notion.so as a notes and collaboration tool
-;; for work. It's easy to use and is (in my opinion) the best
-;; web-based solution out there. I have always used Org-mode for
-;; personal ventures of course, but it is a pain to integrate with
-;; non-tech folks. Even tech folks will roll their eyes if your
-;; company-hosted repo has a README.org instead of the tried and true
-;; README.md. I decided to abandon Notion.so because I couldn't wait
-;; for the overdue official API to be released, and was unsatisfied
-;; with the unofficial variants. Nowadays, that story has changed. As
-;; of 2021 the official API is available and ready for action.
-;; 
-;; This package wraps the full Notion.so API with support for all web
-;; requests and object types. The requests are dispatched
-;; asynchronously via the `org-notion-call' function which returns an
-;; EIEIO class instance based on the CALLBACK arg. This is the
-;; low-level interface which can be hacked to your liking.
-;;
-;; The Org-mode integration is achieved with the help of the
-;; `org-element' functions which translate Org syntax to Notion.so
-;; rich text objects and vice-versa. An `org-notion-mode' minor-mode
-;; is provided for interacting with the API from auto-loaded functions
-;; and custom properties are used to keep headlines/files in sync with
-;; their Notion.so counterparts.
 
 ;;; Code:
 (require 'eieio)
@@ -64,32 +40,40 @@
 (defconst org-notion-version "2021-08-16"
   "Notion API Version")
 
-(defconst org-notion--block-types '(paragraph heading_1 heading_2
+(defconst org-notion-block-types '(paragraph heading_1 heading_2
   heading_3 bulleted_list_item numbered_list_item to_do toggle
   child_page child_database embed image video file pdf bookmark
   callout quote equation divider table_of_contents column
   column_list link_preview synced_block template link_to_page
   unsupported)
   "Type of blocks available for Notion API, used by
-`org-notion-block' object. 'unsupported' refers to an unsupported
+`org-notion-block' class. 'unsupported' refers to an unsupported
 block type.")
 
-(defconst org-notion--annotation-types '(bold italic strikethrough
+(defconst org-notion-annotation-types '(bold italic strikethrough
   underline code)
   "Annotations available for Notion API text objects, used by
-`org-notion-rich-text' object.")
+`org-notion-rich-text' class.")
 
-(defconst org-notion--color-types '(default gray brown orange
+(defconst org-notion-color-types '(default gray brown orange
   yellow green blue purple pink red gray_background
   brown_background orange_background yellow_background
   green_background blue_background purple_background
   pink_background red_background)
   "Colors available for Notion API text objects, used by
-`org-notion-rich-text' object.")
+`org-notion-rich-text' class.")
 
-(defconst org-notion--mention-types '(user page database date link_preview)
+(defconst org-notion-mention-types '(user page database date link_preview)
   "Mention types available for Notion API text objects, used by
-  `org-notion-rich-text' object.")
+  `org-notion-rich-text' class.")
+
+(defconst org-notion-method-types '(search
+ current-user user users 
+ database query-database create-database update-database
+ page page-property create-page update-page delete-page
+ block block-children update-block append-block delete-block)
+  "Method types available for Notion API requests, used by
+`org-notion-request' class.")
 
 (defgroup org-notion nil
   "Customization group for org-notion."
@@ -126,16 +110,19 @@ parameter. Maximum value is 100."
 (defvar org-notion-id-property "NOTION_ID"
   "Name of NOTION_ID Org-mode property.")
 
-(defvar org-notion-page-list nil
-  "List of Notion.so pages.")
+(defvar org-notion-page-cache nil
+  "List of Notion pages.")
 
-(defvar org-notion-database-list nil
-  "List of Notion.so databases.")
+(defvar org-notion-database-cache nil
+  "List of Notion databases.")
+
+(defvar org-notion-block-cache nil
+  "List of Notion blocks.")
 
 (defvar org-notion-object-tracker nil)
 
-(defvar org-notion-proc-buffer (generate-new-buffer-name " *org-notion-proc-")
-  "Name of the org-notion buffer.")
+(defvar org-notion-proc-buffer "org-notion-proc"
+  "Name of the org-notion process buffer.")
 
 (defvar org-notion-buffer-kill-prompt t
   "Ask before killing org-notion buffer.")
@@ -149,9 +136,24 @@ parameter. Maximum value is 100."
 					 (format "notion:%s"))))
     
 ;;; Errors
-    (defvar org-notion-verbosity 'debug)
+(defvar org-notion-verbosity 'debug)
+
 (defun org-notion-log (s)
   (when (eq 'debug org-notion-verbosity) (message "%s" s)))
+
+(define-error 'org-notion-error "Unknown org-notion error")
+(define-error 'org-notion-bad-request "HTTP 400: Bad Request" 'org-notion-error)
+(define-error 'org-notion-unauthorized "HTTP 401: Unauthorized" 'org-notion-error)
+(define-error 'org-notion-restricted-resource "HTTP 403: Restricted Resource" 'org-notion-error)
+(define-error 'org-notion-not-found "HTTP 404: Object not found" 'org-notion-error)
+(define-error 'org-notion-conflict "HTTP 409: Conflict error possibly due to data collision" 'org-notion-error)
+(define-error 'org-notion-rate-limited "HTTP 429: Exceeded number of requests allowed" 'org-notion-error)
+(define-error 'org-notion-unexpected "HTTP 500: Internal server error occurred" 'org-notion-error)
+(define-error 'org-notion-unavailable "HTTP 503: Notion is unavailable" 'org-notion-error)
+(define-error 'org-notion-database-unavailable "HTTP 503: Notion database service is unavailable" 'org-notion-error)
+
+(defun org-notion--api-error (status)
+  "Propagate an error message returned from Notion API.")
 
 ;;; EIEIO
 (defclass org-notion-class nil
@@ -160,7 +162,7 @@ parameter. Maximum value is 100."
   :abstract "Class org-notion-class is abstract.
 use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create instances.")
 
-(cl-defmethod org-notion-obj-dump ((obj org-notion-class))
+(cl-defmethod org-notion-dump ((obj org-notion-class))
   "Pretty-print EIEIO class objects as string."
   (let ((slots (mapcar (lambda (slot) (aref slot 1)) (eieio-class-slots (eieio-object-class obj)))))
     (setq slots (cl-remove-if (lambda (s) (not (slot-boundp obj s))) slots))
@@ -172,10 +174,13 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 
 (defclass org-notion-object (org-notion-class eieio-instance-tracker)
   ((id
+    :initform ""
     :initarg :id
     :type string
+    :accessor org-notion-id
     :documentation "UUID v4 associated with this object")
    (data
+    :initform nil
     :initarg :data
     :documentation "alist of JSON data.")
    (tracking-symbol :initform 'org-notion-object-tracker))
@@ -184,6 +189,8 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 (cl-defgeneric org-notion-from-json (str)
   "Interpret json STR as `org-notion-object'")
 
+(cl-defmethod org-notion-from-json (obj org-notion-object)
+  )
 (cl-defgeneric org-notion-to-json (obj)
   "Interpret `org-notion-object' OBJ as json string.")
 
@@ -193,37 +200,43 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 (cl-defgeneric org-notion-to-org (obj)
   "Interpret `org-notion-object' OBJ as Org-mode syntax.")
 
-(cl-defmethod org-notion-uuid ((obj org-notion-object))
+(cl-defmethod org-notion-id ((obj org-notion-object))
   (let ((id (slot-value obj 'id)))
     (when id
       (slot-value obj 'id))))
 
 (defclass org-notion-user (org-notion-object)
   ((type
+    :initform ""
     :initarg :type
     :type string
     :documentation "Type of the user. This slot should be either
     'person' or 'bot'.")
    (name
+    :initform ""
     :initarg :name
     :type string
     :documentation "User's name, as displayed in Notion.")
    (avatar
+    :initform nil
     :initarg :avatar
-    :type string
+    :type (or null string)
     :documentation "Chosen avatar image.")
    (email
+    :initform ""
     :initarg :email
-    :type (or null string)
+    :type string
     :documentation "Email address of a user. Only present if
     `:type' is 'person' and integration has user capabilities
     that allow access to email addresses.")
    (owner-type
+    :initform nil
     :initarg :owner-type
     :type (or null string)
     :documentation "The type of owner -- either 'workspace' or
     'user'")
    (owner
+    :initform nil
     :initarg :owner
     :type (or null object)
     :documentation "The owner of a bot user -- either null,
@@ -240,25 +253,34 @@ a bot. Identified by the `:id' slot.")
     :initarg :updated
     :documentation "Datetime when this database was updated.")
    (title
+    :initform ""
     :initarg :title
     :documentation "Name of the database as it appears in
     Notion.")
    (icon
+    :initform nil
     :initarg :icon
+    :type (or null string)
     :documentation "Page icon.")
    (cover
+    :initform nil
     :initarg :cover
+    :type (or null string)
     :documentation "Page cover image.")
    (properties
     :initarg :properties
     :documentation "Schema of properties for the database as they
     appear in Notion.")
    (parent
+    :initform nil
     :initarg :parent
+    :type (or null object)
     :documentation "The parent of this page. Can be a page or
     workspace.")
    (url
+    :initform ""
     :initarg :url
+    :type string
     :documentation "The URL of the Notion database."))
   :documentation "Notion.so database object - identified by the
 `:id' slot.")
@@ -271,33 +293,44 @@ a bot. Identified by the `:id' slot.")
     :initarg :updated
     :documentation "Datetime when this page was updated.")
    (archived
+    :initform nil
     :initarg :archived
+    :type boolean
     :documentation "The archived status of the page.")
    (icon
+    :initform nil
     :initarg :icon
+    :type (or null string)
     :documentation "Page icon.")
    (cover
+    :initform nil
     :initarg :cover
+    :type (or null string)
     :documentation "Page cover image.")
    (properties
     :initarg :properties
     :documentation "Property values of this page.")
    (parent
+    :initform nil
     :initarg :parent
+    :type (or null object)
     :documentation "The parent of this page. Can be a database,
     page, or workspace.")
    (url
+    :initform ""
     :initarg :url
+    :type string
     :documentation "The URL of the Notion page."))
   :documentation "Notion.so page object - identified by the `:id'
 slot.")
 
 (defclass org-notion-block (org-notion-object)
   ((type
+    :initform unsupported
     :initarg :type
-    :type string
+    :type symbol
     :documentation "Type of block. See variable
-    `org-notion--block-types' for possible values.")
+    `org-notion-block-types' for possible values.")
    (created
     :initarg :created
     :documentation "Datetime when this block was created.")
@@ -305,10 +338,12 @@ slot.")
     :initarg :updated
     :documentation "Datetime when this block was last updated.")
    (archived
+    :initform nil
     :initarg :archived
     :type boolean
     :documentation "The archived status of the block.")
    (has_children
+    :initform nil
     :initarg :has_children
     :type boolean
     :documentation "Whether or not the block has children blocks
@@ -318,53 +353,64 @@ slot.")
 
 (defclass org-notion-rich-text (org-notion-class)
   ((type
+    :initform "text"
     :initarg :type
     :type string
     :documentation "Type of this rich text object. Possible
     values are: 'text', 'mention', 'equation'")
    (plain_text
+    :initform ""
     :initarg :plain_text
     :type string
     :documentation "The plain text without annotations.")
    (href
+    :initform nil
     :initarg :href
-    :type string
+    :type (or null string)
     :documentation "The URL of any link or internal Notion
     mention in this text, if any.")
    (annotations
+    :initform nil
     :initarg :annotations
+    :type (or null string)
     :documentation "All annotations that apply to this rich
-    text. See `org-notion--annotation-types' for a list of
+    text. See `org-notion-annotation-types' for a list of
     possible values.")
    (color
+    :initform default
     :initarg :color
+    :type symbol
     :documentation "Color that applies to this rich text. See
-    `org-notion--color-types' for a list of possible values."))
+    `org-notion-color-types' for a list of possible values."))
   :documentation "Notion.so rich text object.")
 
 (defclass org-notion-inline-text (org-notion-rich-text)
   ((content
+    :initform ""
     :initarg :content
     :type string
     :documentation "Text content.")
    (link
+    :initform ""
     :initarg :link
-    :type string
+    :type (or null string)
     :documentation "Any inline link in this text."))
   :documentation "Notion.so inline text object found in
 `org-notion-rich-text' of type 'text'")
 
 (defclass org-notion-inline-mention (org-notion-rich-text)
   ((mention_type
+    :initform nil
     :initarg :mention_type
-    :type string
+    :type symbol
     :documentation "Type of the inline mention. See
-    `org-notion--mention-types' for a list of possible values."))
+    `org-notion-mention-types' for a list of possible values."))
   :documentation "Notion.so inline mention object found in
 `org-notion-rich-text' of type 'mention'")
 
 (defclass org-notion-inline-equation (org-notion-rich-text)
   ((expression
+    :initform ""
     :initarg :expression
     :type string
     :documentation "The LaTeX string representing this inline
@@ -380,15 +426,17 @@ slot.")
    (version
     :initform `,org-notion-version
     :initarg :version
-    :documentation "Notion.so API Version.")
+    :documentation "Notion API Version.")
    (endpoint
     :initform `,org-notion-endpoint
     :inittarg :endpoint
-    :documentation "Notion.so API endpoint.")
+    :documentation "Notion API endpoint.")
    (method
-    :initform "GET"
+    :initform current-user
     :initarg :method
-    :documentation "HTTP Method to use.")
+    :type symbol
+    :documentation "Notion call symbol. See
+    `org-notion-method-types' for possible values.")
    (data
     :initform nil
     :initarg :data
@@ -458,9 +506,6 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
   (decode-coding-region (point) (point-max) org-notion-coding-system)
   (json-read))
 
-(defun org-notion--api-error ()
-  "Propagate an error message returned from Notion API.")
-
 (defun org-notion-call (call &optional target callback &rest params)
   "Call the Notion.so API with CALL and optional TARGET, then evaluate CALLBACK with supplied PARAMS."
   (with-slots (token version endpoint method data)
@@ -471,10 +516,11 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
       (cl-case call
 	('current-user (let ((url-request-method "GET")
 			     (url (concat endpoint "users/me")))
-			 (url-retrieve url (lambda (_)
-					     (with-current-buffer (current-buffer)
-					       (search-forward "\n\n")
-					       (print (org-notion--json-read)))))))
+			 (url-retrieve url (lambda (status)
+					     (if (plist-member status :error)
+						 (message (format "%d" (car (last (plist-get status :error)))))
+					       (message "200"))
+					     ))))
 	('users (let ((url-request-method "GET")
 		      (url (concat endpoint "users")))
 		  (url-retrieve url (lambda (_)

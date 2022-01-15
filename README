@@ -1,18 +1,45 @@
 #+TITLE: org-notion
-#+DATE: 2022-01-11
+#+DATE: 2022-01-14
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
 
-[[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for notes. It is a very powerful
-text-based system for organizing your life in plaintext.
+[[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for keeping notes, maintaining
+TODO lists, and project planning. It is a very powerful text-based
+system for organizing your life in plaintext.
 
-[[https://www.notion.so][Notion]] is a web-based notes application. It works well on all
-platforms and has some cool features including databases, realtime
-collaboration, and as of 2021 an [[https://developers.notion.com/][official API]].
+[[https://www.notion.so][Notion]] is a web-based application with a similar purpose. It works
+well on all platforms and has some cool features including databases,
+realtime collaboration, and as of 2021 an [[https://developers.notion.com/][official API]].
 
 =org-notion= is an Emacs package that uses this API to integrate the
 beauty of Notion with your Org-mode workflow.
+
+* Overview
+Many moons ago I used Notion.so as a notes and collaboration tool
+for work. It's easy to use and is (in my opinion) the best
+web-based solution out there. I have always used Org-mode for
+personal ventures of course, but it is a pain to integrate with
+non-tech folks. Even tech folks will roll their eyes if your
+company-hosted repo has a README.org instead of the tried and true
+README.md. I decided to abandon Notion.so because I couldn't wait
+for the overdue official API to be released, and was unsatisfied
+with the unofficial variants. Nowadays, that story has changed. As
+of 2021 the official API is available and ready for action.
+
+This package wraps the full Notion API with support for all web
+requests and object types. The requests are dispatched asynchronously
+via the methods specializing on the =org-notion-request= EIEIO class
+instance. The responses are parsed to create a subclass of
+=org-notion-object=. This is the low-level interface which can be
+hacked to your liking.
+
+The Org-mode integration is achieved with the help of the
+=org-element= API which is used to translate Org syntax to Notion
+syntax via =org-notion-rich-text= subclasses and vice-versa. An
+=org-notion-mode= minor-mode is provided for interacting with the API
+from auto-loaded functions and custom properties are used to keep
+headlines/files in sync with their Notion counterparts.
 
 * Installation
 =org-notion= only depends on built-in Emacs libraries. To
@@ -32,6 +59,8 @@ Now you can load the package with:
   (require 'org-notion)
 #+end_src
 
+This package will be uploaded to ELPA upon reaching v1.0.0.
+
 * Configuration
 You should create a [[https://www.notion.so/my-integrations][private integration]] on the Notion side if you
 haven't already. This will generate a new Internal Integration Token
@@ -48,10 +77,13 @@ sending requests (=~/.authinfo= or =~/.authinfo.gpg=). This is highly
 recommended as it avoids the prompt and is more secure. You can
 disable the check if you wish to temporarily use a different token
 with =(setq org-notion-check-auth-source nil)=.
+
 * Usage
+
 * Examples
 ** GTD
-** Links
+** Links Database
+
 * Resources
 - Notion
   - [[https://developers.notion.com/][API docs]]
