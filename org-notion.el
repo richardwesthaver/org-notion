@@ -243,19 +243,12 @@ UUID."
     :documentation "Email address of a user. Only present if
     `:type' is 'person' and integration has user capabilities
     that allow access to email addresses.")
-   (owner-type
-    :initform nil
-    :initarg :owner-type
-    :type (or null string)
-    :documentation "The type of owner -- either 'workspace' or
-    'user'")
    (owner
     :initform nil
     :initarg :owner
-    :type (or null object)
-    :documentation "The owner of a bot user -- either null,
-    indicating 'workspace' is owner, or an `org-notion-user'
-    object of `:type' 'person'."))
+    :type (or null string)
+    :documentation "The owner of a bot user -- either 'workspace'
+    or id of user."))
   :documentation "Notion.so user object - can be a real person or
 a bot. Identified by the `:id' slot.")
 
@@ -269,7 +262,17 @@ a bot. Identified by the `:id' slot.")
   (when (not (string-empty-p (oref obj :name)))
     (oref obj :name)))
 
-(cl-defmethod org-notion-from-json ((obj org-notion-user) json))
+(cl-defmethod org-notion-from-json ((obj org-notion-user) json)
+  (if (string= "user" (alist-get 'object json))
+      (progn
+	(oset obj :id (alist-get 'id json))
+	(oset obj :type (alist-get 'type json))
+	(oset obj :name (alist-get 'name json))
+	(oset obj :avatar (alist-get 'avatar_url json))
+	(oset obj :email (alist-get 'email json))
+	(oset obj :owner (cdadar (alist-get 'bot json))))
+    (error "expected user object, found %s" (alist-get 'object json)))
+  obj)
 
 (cl-defmethod org-notion-to-json ((obj org-notion-user)))
 
@@ -369,8 +372,8 @@ a bot. Identified by the `:id' slot.")
    (parent
     :initform nil
     :initarg :parent
-    :type (or null object)
-    :documentation "The parent of this page. Can be a database,
+    :type (or null string)
+    :documentation "The parent id of this page. Can be a database,
     page, or workspace.")
    (url
     :initform ""
@@ -380,7 +383,19 @@ a bot. Identified by the `:id' slot.")
   :documentation "Notion.so page object - identified by the `:id'
 slot.")
 
-(cl-defmethod org-notion-from-json ((obj org-notion-page) json))
+(cl-defmethod org-notion-from-json ((obj org-notion-page) json)
+  (if (string= "page" (alist-get 'object json))
+      (progn
+	(oset obj :id (alist-get 'id json))
+	(oset obj :created (alist-get 'created_time json))
+	(oset obj :updated (alist-get 'last_edited_time json))
+	(oset obj :archived (unless (alist-get 'archived json) t))
+	(oset obj :icon (alist-get 'icon json))
+	(oset obj :cover (alist-get 'cover json))
+	(oset obj :parent (cdadr (alist-get 'parent json)))
+	(oset obj :url (alist-get 'url json)))
+    (error "expected page object, found %s" (alist-get 'object json)))
+  obj)
 
 (cl-defmethod org-notion-to-json ((obj org-notion-page) json))
 
@@ -412,7 +427,11 @@ slot.")
   :documentation "Notion.so block object - identified by the
 `:id' slot.")
 
-(cl-defmethod org-notion-from-json ((obj org-notion-block) json))
+(cl-defmethod org-notion-from-json ((obj org-notion-block) json)
+  (if (string= "block" (alist-get 'object json))
+      (progn
+	(oset obj :id (alist-get 'id json)))
+    (error "expected block object, found %s" (alist-get 'object json))))
 
 (cl-defmethod org-notion-to-json ((obj org-notion-block) json))
 
@@ -512,7 +531,7 @@ slot.")
     :type (or null string)
     :documentation "Payload to be sent with HTTP request.")
    (callback
-    :initform (org-notion-callback-print)
+    :initform org-notion-callback-default
     :initarg :callback
     :documentation "Callback used to handle response from Notion
     API call."))
@@ -535,67 +554,67 @@ slot.")
 	('search (let ((url-request-method "POST")
 		       (endpoint (concat endpoint "search"))
 		       (url-request-data (if (stringp data) (json-encode `(:query ,data)) data)))
-		   (message "%s" (url-retrieve endpoint callback nil nil nil))))
+		   (message "%s" (url-retrieve endpoint (funcall callback) nil nil nil))))
 	('current-user
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint "users/me")))
-	   (url-retrieve url callback nil nil nil)))
-	('users
+	   (url-retrieve url (funcall callback) nil nil nil)))
+	('user
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint "users")))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('database
 	 (let ((url-request-method "GET")
 	       (endpoint (concat endpoint (format "databases/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve endpoint callback nil nil nil)))
+	   (url-retrieve endpoint (funcall callback) nil nil nil)))
 	('query-database
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint (format "databases/%s/query" data))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('create-database
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint "databases")))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('update-database
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "databases/%s")))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('page
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('page-property
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "pages/%s/properties/%s" data data))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('create-page
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint "pages")))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('update-page
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint (format "pages/%s" data))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('block
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "blocks/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('block-children
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "blocks/%s/children" data))))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('update-block
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "blocks/%s" data)))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('append-block
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "blocks/%s/children" data)))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	('delete-block
 	 (let ((url-request-method "DELETE")
 	       (url (concat endpoint "blocks/%s" data)))
-	   (url-retrieve url callback nil nil nil)))
+	   (url-retrieve url (funcall callback) nil nil nil)))
 	(_ (signal 'org-notion-invalid-method method))))))
 
 ;;; Authentication
@@ -658,7 +677,7 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
        (with-current-buffer (current-buffer)
 	 ;;  quick hack. url.el will always return the body at this position.
 	 (search-forward "\n\n")
-	 (json-read))))))
+	 (print (json-read)))))))
 
 (defun org-notion-call (call &optional target callback &rest params)
   "Call the Notion.so API with CALL and optional TARGET, then evaluate CALLBACK with supplied PARAMS."
