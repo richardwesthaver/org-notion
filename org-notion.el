@@ -30,6 +30,7 @@
 (require 'json)
 (require 'url)
 
+;;; Constants
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an entry with
 `auth-source-secrets-create'.")
@@ -72,6 +73,7 @@ block type.")
   "Method types available for Notion API requests, used by
 `org-notion-request' class.")
 
+;;; Customization
 (defgroup org-notion nil
   "Customization group for org-notion."
   :tag "Org Notion"
@@ -104,6 +106,7 @@ parameter. Maximum value is 100."
   :type 'hook
   :group 'org-notion)
 
+;;; Variables
 (defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
   "URI of Notion API endpoint")
 

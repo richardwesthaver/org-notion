@@ -1,1 +1,2 @@
 .*\.elc$
+.dir-locals-[0-9].el
