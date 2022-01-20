@@ -40,9 +40,9 @@
 (defconst org-notion-block-types '(paragraph heading_1 heading_2
   heading_3 bulleted_list_item numbered_list_item to_do toggle
   child_page child_database embed image video file pdf bookmark
-  callout quote equation divider table_of_contents column
-  column_list link_preview synced_block template link_to_page
-  unsupported)
+  callout quote code equation divider table_of_contents
+  breadcrumb column column_list link_preview synced_block
+  template link_to_page table table_row unsupported)
   "Type of blocks available for Notion API, used by
 `org-notion-block' class. 'unsupported' refers to an unsupported
 block type.")
@@ -167,7 +167,7 @@ parameter. Maximum value is 100."
 ;;; EIEIO
 ;; Default superclass. This is inherited by all other org-notion
 ;; classes and should only define new static methods. The only method
-;; implemented is `org-notion-dump' which simply prints the fields of
+;; implemented is `org-notion-print' which simply prints the fields of
 ;; a class instance.
 (defclass org-notion-class nil
   nil
@@ -175,14 +175,14 @@ parameter. Maximum value is 100."
   :abstract "Class org-notion-class is abstract.
 use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create instances.")
 
-(cl-defmethod org-notion-dump ((obj org-notion-class))
+(cl-defmethod org-notion-print ((obj org-notion-class))
   "Pretty-print EIEIO class objects as string."
   (let ((slots (mapcar (lambda (slot) (aref slot 1)) (eieio-class-slots (eieio-object-class obj)))))
     (setq slots (cl-remove-if (lambda (s) (not (slot-boundp obj s))) slots))
     (apply #'concat
 	   (mapcar (lambda (slot)
 		     (let ((slot (intern (pp-to-string slot))))
-		       (format "\n%+4s:   %s" slot (slot-value obj (intern (pp-to-string slot))))))
+		       (format "%+4s:   %s\n" slot (slot-value obj (intern (pp-to-string slot))))))
 		   slots))))
 
 ;; Parent class of Notion objects. The 'id' and 'data' properties are
@@ -215,8 +215,8 @@ UUID."
 (cl-defgeneric org-notion-from-org (obj str)
   "Interrpret Org-mode STR as `org-notion-object'")
 
-(cl-defgeneric org-notion-to-org (obj)
-  "Interpret `org-notion-object' OBJ as Org-mode syntax.")
+(cl-defgeneric org-notion-to-org (obj &optional type)
+  "Interpret `org-notion-object' OBJ as Org-mode syntax TYPE.")
 
 ;; User object
 (defclass org-notion-user (org-notion-object)
@@ -346,9 +346,11 @@ a bot. Identified by the `:id' slot.")
 ;; Page object
 (defclass org-notion-page (org-notion-object)
   ((created
+    :initform (format-time-string "%Y-%m-%d %T")
     :initarg :created
     :documentation "Datetime when this page was created.")
    (updated
+    :initform (format-time-string "%Y-%m-%d %T")
     :initarg :updated
     :documentation "Datetime when this page was updated.")
    (archived
@@ -397,7 +399,26 @@ slot.")
     (error "expected page object, found %s" (alist-get 'object json)))
   obj)
 
-(cl-defmethod org-notion-to-json ((obj org-notion-page) json))
+(cl-defmethod org-notion-to-json ((obj org-notion-page)))
+
+(cl-defmethod org-notion-to-org ((obj org-notion-page) &optional type)
+  (with-slots (id created updated properties parent) obj
+      (pcase type
+       ((or 'nil 'headline) (org-element-interpret-data
+			     `(headline
+			      (:title "mock" :level 1
+				      :CREATED (org-notion-to-org-time created)
+				      :UPDATED (org-notion-to-org-time updated))
+			      (property-drawer nil ((node-property (:key "NOTION_ID" :value ,id))
+						    (node-property (:key "CREATED" :value ,created))
+						    (node-property (:key "UPDATED" :value ,updated)))))))
+       ('file (org-element-interpret-data
+	       `(org-data nil (section nil)
+			 (keyword (:key "TITLE" :value "org-notion"))
+			 (keyword (:key "NOTION_ID" :value ,id))
+			 (keyword (:key "CREATED" :value ,created))
+			 (keyword (:key "UPDATED" :value ,updated)))))
+       (_ (error "invalid org-element type %s" type)))))
 
 ;; Block object
 (defclass org-notion-block (org-notion-object)
@@ -423,17 +444,80 @@ slot.")
     :initarg :has_children
     :type boolean
     :documentation "Whether or not the block has children blocks
-    nested within it."))
-  :documentation "Notion.so block object - identified by the
+    nested within it.")
+   (properties
+    :initform nil
+    :initarg :properties
+    :documentation "alist where KEY is property type and VAL is
+     value.")
+   (text
+    :initform nil
+    :initarg :text
+    :type (or null vector)
+    :documentation "Vector of rich-text objects associated with
+    this block, if any.")
+   (children
+    :initform nil
+    :initarg :children
+    :type (or null vector)
+    :documentation "Vector of block objects which are children of
+    this block, if any."))
+  :documentation "Notion block object - identified by the
 `:id' slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-block) json)
   (if (string= "block" (alist-get 'object json))
       (progn
-	(oset obj :id (alist-get 'id json)))
-    (error "expected block object, found %s" (alist-get 'object json))))
+	(oset obj :id (alist-get 'id json))
+	(oset obj :type (intern (alist-get 'type json)))
+	(oset obj :created (alist-get 'created_time json))
+	(oset obj :updated (alist-get 'last_edited_time json))
+	(oset obj :archived (unless (alist-get 'archived json) t))
+	(oset obj :has_children (unless (alist-get 'has_children json) t))
+	(pcase (oref obj :type)
+	  ('paragraph ()) 		; text
+	  ('heading_1 ()) 		; text
+	  ('heading_2 ()) 		; text
+	  ('heading_3 ()) 		; text
+	  ('bulleted_list_item ()) 	; text + children
+	  ('numbered_list_item ()) 	; text + children
+	  ('to_do ()) 			; text + children + properties
+	  ('toggle ()) 			; text + children
+	  ('child_page 			; properties
+	   (oset obj :properties (car (alist-get 'child_page json)))) 
+	  ('child_database 		; properties
+	   (oset obj :properties (car (alist-get 'child_database json))))
+	  ('embed 			; properties
+	   (oset obj :properties (car (alist-get 'embed json))))
+	  ('image ()) ; file https://developers.notion.com/reference/file-object
+	  ('video ()) ; file
+	  ('file ())  ; file + text
+	  ('pdf ())   ; file
+	  ('bookmark ()) 		; text + properties
+	  ('callout ()) 		; text + properties + children + file/emoji
+	  ('quote ()) 			; text + children
+	  ('code ()) 			; text + properties
+	  ('equation ()) 		; properties
+	  ('divider ()) 		; nil
+	  ('table_of_contents ()) 	; nil
+	  ('breadcrumb ()) 		; nil
+	  ('column ()) 			; children
+	  ('column_list ()) 		; children
+	  ('link_preview ()) 		; properties
+	  ('synced_block ()) 		; properties + children
+	  ('template ()) 		; text + children
+	  ('link_to_page ()) 		; properties
+	  ('table ()) 			; properties
+	  ('table_row ()) 		; children
+	  ('unsupported ())
+	  (_ ())))
+    (error "expected block object, found %s" (alist-get 'object json)))
+  obj)
 
-(cl-defmethod org-notion-to-json ((obj org-notion-block) json))
+(cl-defmethod org-notion-to-json ((obj org-notion-block)))
+
+(cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _)
+  )
 
 ;; Parent class for Notion Rich-text objects. Instances of subclasses
 ;; are de/serialized as an array of JSON objects for interaction with
