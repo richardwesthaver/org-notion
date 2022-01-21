@@ -168,6 +168,7 @@ parameter. Maximum value is 100."
   "Propagate an error message returned from Notion API.")
 
 ;;; EIEIO
+
 ;; Default superclass. This is inherited by all other org-notion
 ;; classes and should only define new static methods. The only method
 ;; implemented is `org-notion-print' which simply prints the fields of
@@ -618,20 +619,19 @@ slot.")
     :type (or null string)
     :documentation "Payload to be sent with HTTP request.")
    (callback
-    :initform org-notion-callback-default
+    :initform (org-notion-callback-default)
     :initarg :callback
     :documentation "Callback used to handle response from Notion
     API call."))
-  :documentation "Notion.so API request.")
+  :documentation "Notion API request.")
 
-(defun org-notion-valid-uuid (str)
-  "Validate uuid STR and return it."
-  (if (and (stringp str)
-	   (string-match-p org-notion-uuid-regexp str))
-	   str
-	   (signal 'org-notion-invalid-uuid str)))
+(defmacro oref-or (&rest body)
+  "Get the value of object or class.")
 
-(cl-defmethod org-notion-dispatch ((obj org-notion-request) &rest args)
+(defmacro oset-or (&rest body)
+  "Set the value of object or class.")
+
+(cl-defmethod org-notion-dispatch (&optional (obj (subclass org-notion-request)) &rest args)
   "Dispatch HTTP request with slots from `org-notion-request' OBJ instance."
   (with-slots (token version endpoint method data callback) obj
     (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
@@ -641,70 +641,75 @@ slot.")
 	('search (let ((url-request-method "POST")
 		       (endpoint (concat endpoint "search"))
 		       (url-request-data (if (stringp data) (json-encode `(:query ,data)) data)))
-		   (message "%s" (url-retrieve endpoint (funcall callback) nil nil nil))))
+		   (url-retrieve endpoint callback nil nil nil)))
 	('current-user
 	 (let ((url-request-method "GET")
-	       (url (concat endpoint "users/me")))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	       (url (concat endpoint "users/me"))
+	       (callback (or (org-notion-with-callback (org-notion-from-json
+							(org-notion-user) json-data))
+			     callback)))
+	   (url-retrieve url callback nil nil nil)))
 	('user
 	 (let ((url-request-method "GET")
-	       (url (concat endpoint "users")))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	       ;; FIX 2022-01-20: this doesn't work
+	       (url (concat endpoint "users/" (or (when (org-notion-uuid-p 'data) 'data) nil))))
+	   (url-retrieve url callback nil nil nil)))
 	('database
 	 (let ((url-request-method "GET")
-	       (endpoint (concat endpoint (format "databases/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve endpoint (funcall callback) nil nil nil)))
+	       (endpoint (concat endpoint "databases/" (org-notion-valid-uuid data))))
+	   (url-retrieve endpoint callback nil nil nil)))
 	('query-database
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint (format "databases/%s/query" data))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('create-database
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint "databases")))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('update-database
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "databases/%s")))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('page
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('page-property
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "pages/%s/properties/%s" data data))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('create-page
 	 (let ((url-request-method "POST")
 	       (url (concat endpoint "pages")))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('update-page
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint (format "pages/%s" data))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('block
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "blocks/%s" (org-notion-valid-uuid data)))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('block-children
 	 (let ((url-request-method "GET")
 	       (url (concat endpoint (format "blocks/%s/children" data))))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('update-block
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "blocks/%s" data)))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('append-block
 	 (let ((url-request-method "PATCH")
 	       (url (concat endpoint "blocks/%s/children" data)))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	('delete-block
 	 (let ((url-request-method "DELETE")
 	       (url (concat endpoint "blocks/%s" data)))
-	   (url-retrieve url (funcall callback) nil nil nil)))
+	   (url-retrieve url callback nil nil nil)))
 	(_ (signal 'org-notion-invalid-method method))))))
 
 ;;; Authentication
+
 ;; RESEARCH 2021-12-28: auth-source secret const function security reccs
 (defun org-notion-token (&optional token)
   "Find the Notion.so API Integration Token.
@@ -729,6 +734,17 @@ token at URL `https://www.notion.so/my-integrations'."
 	(read-passwd "Notion API Token: "))))
 
 ;;; Helpers
+(defun org-notion-valid-uuid (str)
+  "Validate uuid STR and return it."
+  (if (and (stringp str)
+	   (string-match-p org-notion-uuid-regexp str))
+      str
+    (signal 'org-notion-invalid-uuid str)))
+
+(defun org-notion-uuid-p (str)
+  "Return t if STR is a uuid, else nil."
+  (string-match-p org-notion-uuid-regexp str))
+
 (defun org-notion-to-org-time (iso-time-str)
   "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
 Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
@@ -752,100 +768,45 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
        t)
     (error org-time-str)))
 
-;;; API Requests
+;;; Callbacks
+(defmacro org-notion-with-callback (&rest body)
+  "Evaluate BODY as a callback for `org-notion-dispatch'"
+  (declare (debug t)
+	   (indent 0))
+  `(lambda (&rest response)
+    ;; catch errors
+    (if (plist-member response :error)
+	(error "HTTP ERROR: %s" (format "%d" (car (last (plist-get response :error)))))
+      (with-current-buffer (current-buffer)
+	;;  quick hack. url.el will always return the body at this position.
+	(search-forward "\n\n")
+	(let ((json-data (json-read)))
+	  ,@body)))))
+
 (defun org-notion-callback-default ()
-  "Read json string from `org-notion-dispatch' status buffer."
-  (cl-function
-   (lambda (status)
-     ;; catch errors if any
-     (if (plist-member status :error)
-	 (error "HTTP Error %s" (format "%d" (car (last (plist-get status :error)))))
-       ;; jump inside the status buffer.
-       (with-current-buffer (current-buffer)
-	 ;;  quick hack. url.el will always return the body at this position.
-	 (search-forward "\n\n")
-	 (print (json-read)))))))
+  "Read json string from `org-notion-dispatch' status buffer and print output"
+  (org-notion-with-callback (print json-data)))
 
-(defun org-notion-call (call &optional target callback &rest params)
-  "Call the Notion.so API with CALL and optional TARGET, then evaluate CALLBACK with supplied PARAMS."
-  (with-slots (token version endpoint method data)
-      (org-notion-request)
-    (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
-				       ("Notion-Version" . ,version)
-				       ("Content-Type" . "application/json"))))
-      (cl-case call
-	('current-user (let ((url-request-method "GET")
-			     (url (concat endpoint "users/me")))
-			 (url-retrieve url (lambda (status)
-					     (if (plist-member status :error)
-						 (message (format "%d" (car (last (plist-get status :error)))))
-					       (message "200"))
-					     ))))
-	('users (let ((url-request-method "GET")
-		      (url (concat endpoint "users")))
-		  (url-retrieve url (lambda (_)
-				      (with-current-buffer (current-buffer)
-					(search-forward "\n\n")
-					(print (org-notion--json-read)))))))
-	;; TODO 2022-01-12: if ID, just concat, if name or email,
-	;; do a lookup in `org-notion-users', else error and prompt
-	;; user to use 'users call.
-	('user (let ((url-request-method "GET")
-		     (url (concat endpoint (format "users/%s" target))))
-		 (url-retrieve url (lambda (_)
-				     (with-current-buffer (current-buffer)
-				       (search-forward "\n\n")
-				       (print (org-notion--json-read)))))))
-	('search (let ((url-request-method "POST")
-		       (url (concat endpoint "search"))
-		       (url-request-data (json-encode `(:query ,target))))
-		   (url-retrieve url (lambda (_)
-				       (with-current-buffer (current-buffer)
-					 (search-forward "\n\n")
-					 (print (org-notion--json-read)))))))
-	('database ())
-	('page ())
-	('block ())))))
-
+;;;###autoload
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
 `org-notion-token'"
   (interactive)
-  (let ((url-request-method "GET")
-	(url-request-extra-headers
-	 `(("Authorization" . ,(concat "Bearer " (org-notion-token)))
-	   ("Notion-Version" . ,org-notion-version))))
-    (url-retrieve (concat org-notion-endpoint "users/me")
-		  (lambda (_status)
-		    (with-current-buffer (current-buffer)
-		      (search-forward "\n\n")
-		      (message "%s" (alist-get 'id (json-read))))))))
+  (org-notion-dispatch (org-notion-request :method 'current-user)))
 
+;;;###autoload
 (defun org-notion-get-users ()
   "Get all users in the Notion workspace. This will return a 403
 status code if your integration doesn't have User Capabilities
 enabled."
   (interactive)
-  (let ((url-request-method "GET")
-	(url-request-extra-headers
-	 `(("Authorization" . ,(concat "Bearer " (org-notion-token)))
-	   ("Notion-Version" . ,org-notion-version))))
-    (url-retrieve (concat org-notion-endpoint "users")
-		  (lambda (_status)
-		    (switch-to-buffer (current-buffer))))))
+  (org-notion-dispatch (org-notion-request :method 'user)))
 
 (defun org-notion-search (query)
   "Search the Notion workspace using QUERY"
   (interactive
    "squery: ")
-  (let ((url-request-method "POST")
-	(url-request-extra-headers
-	 `(("Authorization" . ,(concat "Bearer " (org-notion-token)))
-	   ("Notion-Version" . ,org-notion-version)))
-	(url-request-data (json-encode (list :query query))))
-    (url-retrieve (concat org-notion-endpoint "search")
-		  (lambda (_status)
-		    (with-current-buffer (current-buffer) (switch-to-buffer (current-buffer) (message "success")))))))
+  (org-notion-dispatch (org-notion-request :method 'search :data query)))
 
 ;;; Org-mode
 (defun org-notion-id-at-point (&optional pom)
