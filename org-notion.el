@@ -94,6 +94,15 @@ parameter. Maximum value is 100."
 
 (defcustom org-notion-coding-system 'utf-8
   "Use custom coding system for org-notion."
+  :type 'symbol
+  :group 'org-notion)
+
+(defcustom org-notion-completion-ignore-case t
+  "org-notion specific value of `completion-ignore-case'"
+  :group 'org-notion)
+
+(defcustom org-notion-completion-list t
+  ""
   :group 'org-notion)
 
 (defcustom org-notion-push-hook nil
@@ -116,25 +125,26 @@ parameter. Maximum value is 100."
 (defvar org-notion-uuid-regexp "\\<[[:xdigit:]]\\{8\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{12\\}\\>"
   "A regular expression matching a UUID with or without hyphens.")
 
-(defvar org-notion-page-cache nil
-  "Hashtable of Notion pages.")
+(defvar org-notion-hashtable (make-hash-table :test #'equal)
+  "Hashtable for `org-notion-class' instances.")
 
-(defvar org-notion-database-cache nil
-  "Hashtable of Notion databases.")
+(defvar org-notion-page-cache (make-hash-table :test #'equal)
+  "Cache of Notion pages.")
 
-(defvar org-notion-block-cache nil
-  "Hashtable of Notion blocks.")
+(defvar org-notion-database-cache (make-hash-table :test #'equal)
+  "Cache of Notion databases.")
+
+(defvar org-notion-block-cache (make-hash-table :test #'equal)
+  "Cache of Notion blocks.")
+
+(defvar org-notion-search-results (make-hash-table :test #'equal)
+  "Cache of search results. ")
 
 (defvar org-notion-object-tracker nil
-  "List of `org-notion-object' instances.")
+  "List of active `org-notion-object' instances.")
 
 (defvar org-notion-proc-buffer "org-notion-proc"
   "Name of the org-notion process buffer.")
-
-(defvar org-notion-buffer-kill-prompt t
-  "Ask before killing org-notion buffer.")
-
-(make-variable-buffer-local 'org-notion-buffer-kill-prompt)
 
 (if (fboundp 'org-link-set-parameters)
     (org-link-set-parameters "notion"
@@ -167,6 +177,111 @@ parameter. Maximum value is 100."
 (defun org-notion-api-error (status)
   "Propagate an error message returned from Notion API.")
 
+;;; Utilities
+;;;###autoload
+(defsubst org-notion-objects (&optional class)
+  "Return a list of all org-notion class instances. if CLASS is
+given, only show instances of this class."
+  (if class
+      (seq-filter
+       (lambda (o)
+	 (same-class-p o class))
+       org-notion-object-tracker)
+    org-notion-object-tracker))
+
+(defun org-notion-clear-vars ()
+  "Set all internal org-notion vars to nil."
+  (setq org-notion-object-tracker nil)
+  (clrhash org-notion-hashtable)
+  (clrhash org-notion-page-cache)
+  (clrhash org-notion-database-cache)
+  (clrhash org-notion-block-cache))
+
+(defun org-notion-gethash (key &optional pred)
+  "Return objects associated with KEY in `org-notion-hashtable'.
+KEY must be a string or nil. Empty strings and nil are
+ignored. PREDICATE may take the same values as
+`org-notion-completion-list'. If the symbol id is used, return
+a single object, otherwise return a list.'"
+  (when (and key (not (string-empty-p key)))
+    (let* ((key (downcase key))
+	   (all-objs (gethash key org-notion-hashtable))
+	   objs)
+      (if (or (not pred) (eq t pred))
+	  all-objs)
+      (if (eql pred 'id)
+	  (car all-objs)
+	(dolist (o all-objs objs)
+	  (if (catch 'org-notion-hash-ok
+		(org-notion-hash-p key o pred))
+	  (push o objs)))))))
+
+(defun org-notion-puthash (key obj)
+  "Associate OBJ with KEY in `org-notion-hashtable'. KEY must be a
+string or nil. Empty strings and nil are ignored."
+  (if (and key (not (string-empty-p key)))
+      (let* ((key (downcase key))
+	     (objs (gethash key org-notion-hashtable)))
+	(puthash key (if objs (cl-pushnew obj objs)
+		       (list obj))
+		 org-notion-hashtable))))
+
+(defun org-notion-remhash (key obj)
+  "Remove OBJ from list of objects associated with KEY. KEY must be
+a string or nil. Empty strings and nil are ignored."
+  (if (and key (not (string-empty-p key)))
+      (let* ((key (downcase key))
+	     (objs (gethash key org-notion-hashtable)))
+	(when objs
+	  (setq objs (delq obj objs))
+	  (if objs
+	      (puthash key objs org-notion-hashtable)
+	    (remhash key org-notion-hashtable))))))
+
+(defun org-notion-hash-p (key obj pred))
+
+(defun org-notion-updhash (obj old new)
+  "Update hash for OBJ. Remove OLD, insert NEW. both OLD and NEW
+are lists of values."
+  (dolist (i old)
+    (org-notion-remhash i obj))
+  (dolist (i new)
+    (org-notion-puthash i obj)))
+
+(defun org-notion-valid-uuid (str)
+  "Validate uuid STR and return it."
+  (if (and (stringp str)
+	   (string-match-p org-notion-uuid-regexp str))
+      str
+    (signal 'org-notion-invalid-uuid str)))
+
+(defun org-notion-uuid-p (str)
+  "Return t if STR is a uuid, else nil."
+  (string-match-p org-notion-uuid-regexp str))
+
+(defun org-notion-to-org-time (iso-time-str)
+  "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
+Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
+03:59:15\", with the current timezone being -0500."
+  (condition-case _
+      (org-format-time-string
+       "%Y-%m-%d %T"
+       (apply
+        'encode-time
+        (iso8601-parse iso-time-str)))
+    (error iso-time-str)))
+
+;; TODO 2022-01-07: account for timezone
+(defun org-notion-from-org-time (org-time-str)
+  "Convert ORG-TIME-STR back to ISO-8601 time format."
+  (condition-case _
+      (format-time-string
+       "%FT%T%z"
+       (apply 'encode-time
+	      (parse-time-string org-time-str))
+       t)
+    (error org-time-str)))
+
 ;;; EIEIO
 
 ;; Default superclass. This is inherited by all other org-notion
@@ -174,9 +289,9 @@ parameter. Maximum value is 100."
 ;; implemented is `org-notion-print' which simply prints the fields of
 ;; a class instance.
 (defclass org-notion-class nil
-  nil
-  :documentation "Default superclass inherited by `org-notion' classes."
-  :abstract "Class org-notion-class is abstract.
+    nil
+    :documentation "Default superclass inherited by `org-notion' classes."
+    :abstract "Class org-notion-class is abstract.
 use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create instances.")
 
 (cl-defmethod org-notion-print ((obj org-notion-class))
@@ -652,7 +767,11 @@ slot.")
 	('user
 	 (let ((url-request-method "GET")
 	       ;; FIX 2022-01-20: this doesn't work
-	       (url (concat endpoint "users/" (or (when (org-notion-uuid-p 'data) 'data) nil))))
+	       (url (concat endpoint "users/" (org-notion-valid-uuid data))))
+	   (url-retrieve url callback nil nil nil)))
+	('users
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint "users/")))
 	   (url-retrieve url callback nil nil nil)))
 	('database
 	 (let ((url-request-method "GET")
@@ -733,41 +852,6 @@ token at URL `https://www.notion.so/my-integrations'."
     (or token
 	(read-passwd "Notion API Token: "))))
 
-;;; Helpers
-(defun org-notion-valid-uuid (str)
-  "Validate uuid STR and return it."
-  (if (and (stringp str)
-	   (string-match-p org-notion-uuid-regexp str))
-      str
-    (signal 'org-notion-invalid-uuid str)))
-
-(defun org-notion-uuid-p (str)
-  "Return t if STR is a uuid, else nil."
-  (string-match-p org-notion-uuid-regexp str))
-
-(defun org-notion-to-org-time (iso-time-str)
-  "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
-Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
-03:59:15\", with the current timezone being -0500."
-  (condition-case _
-      (org-format-time-string
-       "%Y-%m-%d %T"
-       (apply
-        'encode-time
-        (iso8601-parse iso-time-str)))
-    (error iso-time-str)))
-
-;; TODO 2022-01-07: account for timezone
-(defun org-notion-from-org-time (org-time-str)
-  "Convert ORG-TIME-STR back to ISO-8601 time format."
-  (condition-case _
-      (format-time-string
-       "%FT%T%z"
-       (apply 'encode-time
-	      (parse-time-string org-time-str))
-       t)
-    (error org-time-str)))
-
 ;;; Callbacks
 (defmacro org-notion-with-callback (&rest body)
   "Evaluate BODY as a callback for `org-notion-dispatch'"
@@ -800,7 +884,7 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
 status code if your integration doesn't have User Capabilities
 enabled."
   (interactive)
-  (org-notion-dispatch (org-notion-request :method 'user)))
+  (org-notion-dispatch (org-notion-request :method 'users)))
 
 (defun org-notion-search (query)
   "Search the Notion workspace using QUERY"
