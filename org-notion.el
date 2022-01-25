@@ -38,40 +38,60 @@
 (defconst org-notion-version "2021-08-16"
   "Notion API Version")
 
+(defconst org-notion-max-page-size 100
+  "Default count of results returned by Notion. Additional calls
+will be made to collect all results using the 'start_cursor'
+parameter. Maximum value is 100.")
+
+(defconst org-notion-method-types '(search current-user user
+					   users database query-database
+					   create-database
+					   update-database page
+					   page-property create-page
+					   update-page block
+					   block-children update-block
+					   append-block delete-block)
+  "Method types available for Notion API requests, used by
+`org-notion-request' class.")
+
 (defconst org-notion-block-types '(paragraph heading_1 heading_2
-  heading_3 bulleted_list_item numbered_list_item to_do toggle
-  child_page child_database embed image video file pdf bookmark
-  callout quote code equation divider table_of_contents
-  breadcrumb column column_list link_preview synced_block
-  template link_to_page table table_row unsupported)
+					     heading_3 bulleted_list_item
+					     numbered_list_item to_do
+					     toggle child_page
+					     child_database embed image
+					     video file pdf bookmark
+					     callout quote code equation
+					     divider table_of_contents
+					     breadcrumb column column_list
+					     link_preview synced_block
+					     template link_to_page table
+					     table_row unsupported)
   "Type of blocks available for Notion API, used by
 `org-notion-block' class. 'unsupported' refers to an unsupported
 block type.")
 
-(defconst org-notion-annotation-types '(bold italic strikethrough
-  underline code)
-  "Annotations available for Notion API text objects, used by
+(defconst org-notion-color-types '(default gray brown orange
+					   yellow green blue purple pink
+					   red gray_background
+					   brown_background
+					   orange_background
+					   yellow_background
+					   green_background
+					   blue_background
+					   purple_background
+					   pink_background
+					   red_background)
+  "Colors available for Notion API text objects, used by
 `org-notion-rich-text' class.")
 
-(defconst org-notion-color-types '(default gray brown orange
-  yellow green blue purple pink red gray_background
-  brown_background orange_background yellow_background
-  green_background blue_background purple_background
-  pink_background red_background)
-  "Colors available for Notion API text objects, used by
+(defconst org-notion-annotation-types '(bold italic strikethrough
+					     underline code)
+  "Annotations available for Notion API text objects, used by
 `org-notion-rich-text' class.")
 
 (defconst org-notion-mention-types '(user page database date link_preview)
   "Mention types available for Notion API text objects, used by
   `org-notion-rich-text' class.")
-
-(defconst org-notion-method-types '(search
- current-user user users 
- database query-database create-database update-database
- page page-property create-page update-page
- block block-children update-block append-block delete-block)
-  "Method types available for Notion API requests, used by
-`org-notion-request' class.")
 
 ;;; Customization
 (defgroup org-notion nil
@@ -85,13 +105,6 @@ interactive prompt if token isn't found."
   :type 'boolean
   :group 'org-notion)
 
-(defcustom org-notion-page-size 100
-  "Default count of results returned by Notion. Additional calls
-will be made to collect all results using the 'start_cursor'
-parameter. Maximum value is 100."
-  :type 'integer
-  :group 'org-notion)
-
 (defcustom org-notion-coding-system 'utf-8
   "Use custom coding system for org-notion."
   :type 'symbol
@@ -102,8 +115,26 @@ parameter. Maximum value is 100."
   :group 'org-notion)
 
 (defcustom org-notion-completion-list t
-  ""
-  :group 'org-notion)
+  "Control the behaviour of org-notion completion functions.
+If a list of symbols, specify which fields to complete.
+
+Symbols include
+  id (= object uuid)
+  type (= sub-type of object)
+  parent (= object parent)
+  email (= user email address)
+
+If t, completion is done for all of the above.  If nil, no
+completion is offered.
+  "
+  :group 'org-notion
+  :type '(choice (const :tag "No Completion" nil)
+		 (const :tag "Complete all fields" t)
+		 (repeat :tag "Field"
+			 (choice (const id)
+				 (const type)
+				 (const parent)
+				 (const email)))))
 
 (defcustom org-notion-push-hook nil
   "Hook to run after `org-notion-push'"
@@ -155,8 +186,9 @@ parameter. Maximum value is 100."
 ;;; Errors
 (defvar org-notion-verbosity 'debug)
 
-(defun org-notion-log (s)
-  (when (eq 'debug org-notion-verbosity) (message "%s" s)))
+(defun org-notion-log (&rest s)
+  (when (eq 'debug org-notion-verbosity)
+    (message "%s" s)))
 
 (define-error 'org-notion-error "Unknown org-notion error")
 
@@ -174,12 +206,7 @@ parameter. Maximum value is 100."
 (define-error 'org-notion-unavailable "HTTP 503 Notion is unavailable" 'org-notion-error)
 (define-error 'org-notion-database-unavailable "HTTP 503 Notion database service is unavailable" 'org-notion-error)
 
-(defun org-notion-api-error (status)
-  "Propagate an error message returned from Notion API.")
-
 ;;; Utilities
-
-;;;###autoload
 (defsubst org-notion-objects (&optional class)
   "Return a list of all org-notion class instances. if CLASS is
 given, only show instances of this class."
@@ -212,15 +239,30 @@ given, only show instances of this class."
   (clrhash org-notion-database-cache)
   (clrhash org-notion-block-cache))
 
+(defun org-notion-hash-p (key obj pred)
+  "Throw `org-notion-hash-ok' non-nil if KEY matches OBJ according to PRED.
+PRED may take the same values as the elements of `org-notion-completion-list'."
+  (if (and (memq 'id pred)
+	   (org-notion-string= key (org-notion-id obj)))
+      (throw 'org-notion-hash-ok 'id))
+  (if (and (memq 'type pred)
+	   (org-notion-string= key (oref obj :type)))
+      (throw 'org-notion-hash-ok 'type))
+  (if (and (memq 'parent pred)
+	   (org-notion-string= key (oref obj :parent)))
+      (throw 'org-notion-hash-ok 'parent))
+  (if (and (memq 'email pred)
+	   (org-notion-string= key (oref obj :email)))
+      (throw 'org-notion-hash-ok 'email)))
+
 (defun org-notion-gethash (key &optional pred)
   "Return objects associated with KEY in `org-notion-hashtable'.
 KEY must be a string or nil. Empty strings and nil are
 ignored. PREDICATE may take the same values as
 `org-notion-completion-list'. If the symbol id is used, return
 a single object, otherwise return a list.'"
-  (when (and key (not (string-empty-p key)))
-    (let* ((key (downcase key))
-	   (all-objs (gethash key org-notion-hashtable))
+  (when (not (string-empty-p key))
+    (let ((all-objs (gethash key org-notion-hashtable))
 	   objs)
       (if (or (not pred) (eq t pred))
 	  all-objs)
@@ -229,7 +271,7 @@ a single object, otherwise return a list.'"
 	(dolist (o all-objs objs)
 	  (if (catch 'org-notion-hash-ok
 		(org-notion-hash-p key o pred))
-	  (push o objs)))))))
+	      (push o objs)))))))
 
 (defun org-notion-puthash (key obj)
   "Associate OBJ with KEY in `org-notion-hashtable'. KEY must be a
@@ -253,8 +295,6 @@ a string or nil. Empty strings and nil are ignored."
 	      (puthash key objs org-notion-hashtable)
 	    (remhash key org-notion-hashtable))))))
 
-(defun org-notion-hash-p (key obj pred))
-
 (defun org-notion-hash-update (obj old new)
   "Update hash for OBJ. Remove OLD, insert NEW. both OLD and NEW
 are lists of values."
@@ -263,16 +303,26 @@ are lists of values."
   (dolist (i new)
     (org-notion-puthash i obj)))
 
-(defun org-notion-valid-uuid (str)
-  "Validate uuid STR and return it."
-  (if (and (stringp str)
-	   (string-match-p org-notion-uuid-regexp str))
-      str
-    (signal 'org-notion-invalid-uuid (list str))))
-
 (defun org-notion-uuid-p (str)
   "Return t if STR is a uuid, else nil."
-  (string-match-p org-notion-uuid-regexp str))
+  (and (stringp str)
+       (string-match-p org-notion-uuid-regexp str)))
+
+(defun org-notion-valid-uuid (str)
+  "Validate uuid STR and return it."
+  (if (org-notion-uuid-p str)
+      str
+    nil))
+
+(defsubst org-notion-id= (id1 id2)
+  "Return t if ids ID1 and ID2 are equal."
+  (and (org-notion-uuid-p id1) (org-notion-uuid-p id2)
+       (eq t (compare-strings id1 0 nil id2 0 nil))))
+
+(defsubst org-notion-string= (str1 str2)
+  "Return t if strings STR1 and STR2 are equal, ignoring case."
+  (and (stringp str1) (stringp str2)
+       (eq t (compare-strings str1 0 nil str2 0 nil t))))
 
 (defun org-notion-to-org-time (iso-time-str)
   "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
@@ -308,7 +358,9 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
        (search-forward "\n\n")
        (let ((json-data (json-read)))
 	 (if (equal (cdar json-data) "error")
-	     (message "HTTP %d: %s" (alist-get 'status json-data) (alist-get 'message json-data))
+	     (org-notion-log (format "HTTP %d: %s"
+			      (alist-get 'status json-data)
+			      (alist-get 'message json-data)))
 	   ,@body)))))
 
 (defun org-notion-callback-default ()
@@ -374,10 +426,9 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
    (tracking-symbol :initform 'org-notion-object-tracker))
   :documentation "Top-level class for Notion API objects.")
 
-(cl-defmethod org-notion-id ((obj org-notion-object))
-  "Return the 'id' value of OBJ, signals an error if not a valid
-UUID."
-  (when-let ((id (org-notion-valid-uuid (oref obj :id)))) id))
+;; (cl-defmethod org-notion-id ((obj org-notion-object))
+;;   "Return the 'id' value of OBJ."
+;;   (when-let ((id (org-notion-valid-uuid (oref obj :id)))) id))
 
 ;;;; Generic Functions
 ;; The following generics are implemented by `org-notion-object'
@@ -400,12 +451,14 @@ UUID."
     :initform ""
     :initarg :type
     :type string
+    :accessor org-notion-user-type
     :documentation "Type of the user. This slot should be either
     'person' or 'bot'.")
    (name
     :initform ""
     :initarg :name
     :type string
+    :accessor org-notion-user-name
     :documentation "User's name, as displayed in Notion.")
    (avatar
     :initform nil
@@ -416,6 +469,7 @@ UUID."
     :initform nil
     :initarg :email
     :type (or null string)
+    :accessor org-notion-user-email
     :documentation "Email address of a user. Only present if
     `:type' is 'person' and integration has user capabilities
     that allow access to email addresses.")
@@ -427,16 +481,6 @@ UUID."
     or id of user."))
   :documentation "Notion user object - can be a real person or
 a bot. Identified by the `:id' slot.")
-
-(cl-defmethod org-notion-email ((obj org-notion-user))
-  "Return the 'email' value of OBJ."
-  (when-let (email (oref obj :email))
-    email))
-
-(cl-defmethod org-notion-name ((obj org-notion-user))
-  "Return the 'name' value of OBJ."
-  (when (not (string-empty-p (oref obj :name)))
-    (oref obj :name)))
 
 (cl-defmethod org-notion-from-json ((obj org-notion-user) json)
   (if (string= "user" (alist-get 'object json))
@@ -481,6 +525,7 @@ a bot. Identified by the `:id' slot.")
     :documentation "Page cover image.")
    (properties
     :initarg :properties
+    :accessor org-notion-properties
     :documentation "Schema of properties for the database as they
     appear in Notion.")
    (parent
@@ -493,6 +538,7 @@ a bot. Identified by the `:id' slot.")
     :initform ""
     :initarg :url
     :type string
+    :accessor org-notion-url
     :documentation "The URL of the Notion database."))
   :documentation "Notion database object - identified by the
 `:id' slot.")
@@ -546,6 +592,7 @@ a bot. Identified by the `:id' slot.")
     :documentation "Page cover image.")
    (properties
     :initarg :properties
+    :accessor org-notion-properties
     :documentation "Property values of this page.")
    (parent
     :initform nil
@@ -557,6 +604,7 @@ a bot. Identified by the `:id' slot.")
     :initform ""
     :initarg :url
     :type string
+    :accessor org-notion-url
     :documentation "The URL of the Notion page."))
   :documentation "Notion page object - identified by the `:id'
 slot.")
@@ -577,24 +625,26 @@ slot.")
 
 (cl-defmethod org-notion-to-json ((obj org-notion-page)))
 
+(cl-defmethod org-notion-from-org ((obj org-notion-page) str))
+
 (cl-defmethod org-notion-to-org ((obj org-notion-page) &optional type)
   (with-slots (id created updated properties parent) obj
-      (pcase type
-       ((or 'nil 'headline) (org-element-interpret-data
-			     `(headline
-			      (:title "mock" :level 1
+    (pcase type
+      ((or 'nil 'headline) (org-element-interpret-data
+			    `(headline
+			      (:title "mock" :level 1 ; FIXME
 				      :CREATED (org-notion-to-org-time created)
 				      :UPDATED (org-notion-to-org-time updated))
 			      (property-drawer nil ((node-property (:key "NOTION_ID" :value ,id))
 						    (node-property (:key "CREATED" :value ,created))
 						    (node-property (:key "UPDATED" :value ,updated)))))))
-       ('file (org-element-interpret-data
-	       `(org-data nil (section nil)
+      ('file (org-element-interpret-data
+	      `(org-data nil (section nil)
 			 (keyword (:key "TITLE" :value "org-notion"))
 			 (keyword (:key "NOTION_ID" :value ,id))
 			 (keyword (:key "CREATED" :value ,created))
 			 (keyword (:key "UPDATED" :value ,updated)))))
-       (_ (error "invalid org-element type %s" type)))))
+      (_ (error "invalid org-element type %s" type)))))
 
 ;; Block object
 (defclass org-notion-block (org-notion-object)
@@ -624,6 +674,7 @@ slot.")
    (properties
     :initform nil
     :initarg :properties
+    :accessor org-notion-properties
     :documentation "alist where KEY is property type and VAL is
      value.")
    (text
@@ -692,8 +743,7 @@ slot.")
 
 (cl-defmethod org-notion-to-json ((obj org-notion-block)))
 
-(cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _)
-  )
+(cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _))
 
 ;; Parent class for Notion Rich-text objects. Instances of subclasses
 ;; are de/serialized as an array of JSON objects for interaction with
@@ -730,6 +780,11 @@ slot.")
     :documentation "Color that applies to this rich text. See
     `org-notion-color-types' for a list of possible values."))
   :documentation "Notion rich text object.")
+
+(cl-defmethod org-notion-from-json ((obj (subclass org-notion-rich-text))))
+(cl-defmethod org-notion-to-json ((obj (subclass org-notion-rich-text))))
+(cl-defmethod org-notion-from-org ((obj (subclass org-notion-rich-text)) str))
+(cl-defmethod org-notion-to-org ((obj (subclass org-notion-rich-text)) &optional type))
 
 (defclass org-notion-inline-text (org-notion-rich-text)
   ((content
@@ -788,7 +843,7 @@ slot.")
    (data
     :initform nil
     :initarg :data
-    :type (or null string)
+    :type (or null list)
     :documentation "Payload to be sent with HTTP request.")
    (callback
     :initform (org-notion-callback-default)
@@ -800,109 +855,145 @@ slot.")
 (cl-defmethod org-notion-dispatch ((obj org-notion-request))
   "Dispatch HTTP request with slots from `org-notion-request' OBJ instance."
   (with-slots (token version endpoint method data callback) obj
-  (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
-				     ("Notion-Version" . ,version)
-				     ("Content-Type" . "application/json")))
-	(callback (or callback (org-notion-callback-default))))
-    (pcase method
-      ;; query: string
-      ;; sort: {direction:(ascending/descending) timestamp:last_edited_time}
-      ;; filter: {value:(page/database) property:object}
-      ;; start_cursor: string
-      ;; page_size: int
-      ('search (let ((url-request-method "POST")
-		     (endpoint (concat endpoint "search"))
-		     (url-request-data (if (stringp data) (json-encode `(:query ,data)) data)))
-		 (url-retrieve endpoint callback nil nil nil)))
-      ('current-user
-       (let ((url-request-method "GET")
-	     (url (concat endpoint "users/me")))
-	 (url-retrieve url callback nil nil nil)))
-      ('user
-       (let ((url-request-method "GET")
-	     ;; FIX 2022-01-20: this doesn't work
-	     (url (concat endpoint "users/" (org-notion-valid-uuid data))))
-	 (url-retrieve url callback nil nil nil)))
-      ('users
-       (let ((url-request-method "GET")
-	     (url (concat endpoint "users/")))
-	 (url-retrieve url callback nil nil nil)))
-      ('database
-       (let ((url-request-method "GET")
-	     (endpoint (concat endpoint "databases/" (org-notion-valid-uuid data))))
-	 (url-retrieve endpoint callback nil nil nil)))
-      ;; filter: {}
-      ;; sorts: <>
-      ;; start_cursor: string
-      ;; page_size: int
-      ('query-database
-       (let ((url-request-method "POST")
-	     (url (concat endpoint (format "databases/%s/query" data))))
-	 (url-retrieve url callback nil nil nil)))
-      ;; parent: {type:page_id page_id:id}
-      ;; title: rich-text
-      ;; properties: {}
-      ('create-database
-       (let ((url-request-method "POST")
-	     (url (concat endpoint "databases")))
-	 (url-retrieve url callback nil nil nil)))
-      ;; parent: {type:page_id page_id:id}
-      ;; title: rich-text
-      ;; properties: {}
-      ('update-database
-       (let ((url-request-method "PATCH")
-	     (url (concat endpoint "databases/%s" (org-notion-valid-uuid data))))
-	 (url-retrieve url callback nil nil nil)))
-      ('page
-       (let ((url-request-method "GET")
-	     (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
-	 (url-retrieve url callback nil nil nil)))
-      ('page-property
-       (let ((url-request-method "GET")
-	     (url (concat endpoint (format "pages/%s/properties/%s" data data))))
-	 (url-retrieve url callback nil nil nil)))
-      ;; parent: {type:(page_id/database_id) X_id:id}
-      ;; properties: {}
-      ;; children: <>
-      ;; icon: {}
-      ;; cover: {}
-      ('create-page
-       (let ((url-request-method "POST")
-	     (url (concat endpoint "pages")))
-	 (url-retrieve url callback nil nil nil)))
-      ;; properties: {}
-      ;; archived: bool
-      ;; icon: {}
-      ;; cover: {}
-      ('update-page
-       (let ((url-request-method "PATCH")
-	     (url (concat endpoint (format "pages/%s" data))))
-	 (url-retrieve url callback nil nil nil)))
-      ('block
-       (let ((url-request-method "GET")
-	     (url (concat endpoint (format "blocks/%s" (org-notion-valid-uuid data)))))
-	 (url-retrieve url callback nil nil nil)))
-      ('block-children
-       (let ((url-request-method "GET")
-	     (url (concat endpoint (format "blocks/%s/children" data))))
-	 (url-retrieve url callback nil nil nil)))
-      ;; type: (text/checked)
-      ;; archived: bool
-      ('update-block
-       (let ((url-request-method "PATCH")
-	     (url (concat endpoint "blocks/%s" data)))
-	 (url-retrieve url callback nil nil nil)))
-      ;; children: <blocks>
-      ('append-block
-       (let ((url-request-method "PATCH")
-	     (url (concat endpoint "blocks/%s/children" data)))
-	 (url-retrieve url callback nil nil nil)))
-      ;; nil
-      ('delete-block
-       (let ((url-request-method "DELETE")
-	     (url (concat endpoint "blocks/%s" data)))
-	 (url-retrieve url callback nil nil nil)))
-      (_ (signal 'org-notion-invalid-method method))))))
+    (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
+				       ("Notion-Version" . ,version)
+				       ("Content-Type" . "application/json")))
+	  (callback (or callback (org-notion-callback-default))))
+      (pcase method
+	('search (let ((url-request-method "POST")
+		       (endpoint (concat endpoint "search"))
+		       (url-request-data (json-encode data)))
+		   (url-retrieve endpoint callback nil nil nil)))
+	('current-user
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint "users/me")))
+	   (url-retrieve url callback nil nil nil)))
+	('user
+	 (let ((url-request-method "GET")
+	       ;; FIX 2022-01-20: this doesn't work
+	       (url (concat endpoint "users/" (org-notion-valid-uuid data))))
+	   (url-retrieve url callback nil nil nil)))
+	('users
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint "users/")))
+	   (url-retrieve url callback nil nil nil)))
+	('database
+	 (let ((url-request-method "GET")
+	       (endpoint (concat endpoint "databases/" (org-notion-valid-uuid data))))
+	   (url-retrieve endpoint callback nil nil nil)))
+	;; filter: {}
+	;; sorts: <>
+	;; start_cursor: string
+	;; page_size: int
+	('query-database
+	 (let ((url-request-method "POST")
+	       (url (concat endpoint (format "databases/%s/query" data))))
+	   (url-retrieve url callback nil nil nil)))
+	;; parent: {type:page_id page_id:id}
+	;; title: rich-text
+	;; properties: {}
+	('create-database
+	 (let ((url-request-method "POST")
+	       (url (concat endpoint "databases")))
+	   (url-retrieve url callback nil nil nil)))
+	;; parent: {type:page_id page_id:id}
+	;; title: rich-text
+	;; properties: {}
+	('update-database
+	 (let ((url-request-method "PATCH")
+	       (url (concat endpoint "databases/%s" (org-notion-valid-uuid data))))
+	   (url-retrieve url callback nil nil nil)))
+	('page
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
+	   (url-retrieve url callback nil nil nil)))
+	('page-property
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint (format "pages/%s/properties/%s" data data))))
+	   (url-retrieve url callback nil nil nil)))
+	;; parent: {type:(page_id/database_id) X_id:id}
+	;; properties: {}
+	;; children: <>
+	;; icon: {}
+	;; cover: {}
+	('create-page
+	 (let ((url-request-method "POST")
+	       (url (concat endpoint "pages")))
+	   (url-retrieve url callback nil nil nil)))
+	;; properties: {}
+	;; archived: bool
+	;; icon: {}
+	;; cover: {}
+	('update-page
+	 (let ((url-request-method "PATCH")
+	       (url (concat endpoint (format "pages/%s" data))))
+	   (url-retrieve url callback nil nil nil)))
+	('block
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint (format "blocks/%s" (org-notion-valid-uuid data)))))
+	   (url-retrieve url callback nil nil nil)))
+	('block-children
+	 (let ((url-request-method "GET")
+	       (url (concat endpoint (format "blocks/%s/children" data))))
+	   (url-retrieve url callback nil nil nil)))
+	;; type: (text/checked)
+	;; archived: bool
+	('update-block
+	 (let ((url-request-method "PATCH")
+	       (url (concat endpoint "blocks/%s" data)))
+	   (url-retrieve url callback nil nil nil)))
+	;; children: <blocks>
+	('append-block
+	 (let ((url-request-method "PATCH")
+	       (url (concat endpoint "blocks/%s/children" data)))
+	   (url-retrieve url callback nil nil nil)))
+	('delete-block
+	 (let ((url-request-method "DELETE")
+	       (url (concat endpoint "blocks/%s" data)))
+	   (url-retrieve url callback nil nil nil)))
+	(_ (signal 'org-notion-invalid-method method))))))
+
+(defun org-notion-search-data (query &optional sort filter start page_size)
+  "Prepare data for Notion search. Returns a list where car is
+QUERY string and cdr is a json object containing optional values.
+
+SORT is either \"ascending\" or \"descending\".
+FILTER is either \"page\" or \"database\".
+START AND PAGE_SIZE are integers."
+  (let (data)
+    (push `(query . ,query) data)
+    (when sort
+      (if (and (stringp sort)
+	       (or (string= sort "ascending")
+		   (string= sort "descending")))
+	  (nconc data `((sort . ((direction . ,sort) (timestamp . "last_edited_time")))))
+	(org-notion-log "SORT must be either 'ascending' or 'descending'")))
+    (when filter
+      (if (and (stringp filter)
+	       (or (string= filter "page")
+		   (string= filter "database"))) 
+	  (nconc data `((filter . ((value . ,filter) (property . "object")))))
+	(org-notion-log "FILTER must be either 'page' or 'database'")))
+    (when page_size
+      (if (and (integerp page_size)
+	       (>= org-notion-max-page-size page_size))
+	  (nconc data `((page_size . ,page_size)))
+	(org-notion-log
+	 (format "PAGE_SIZE must be an integer less than or equal to %s"
+		 org-notion-max-page-size))))
+    (when start
+      (if (org-notion-uuid-p start)
+	  (nconc data `((start_cursor . ,start)))
+	(org-notion-log "START must be a valid UUID")))
+    data))
+
+(defun org-notion-database-data ())
+
+(defun org-notion-database-query-data ())
+
+(defun org-notion-page-data ())
+
+(defun org-notion-block-data ())
 
 ;;;###autoload
 (defun org-notion-get-current-user ()
@@ -936,14 +1027,16 @@ enabled."
 					      (alist-get 'id i))))))))))
 
 ;;;###autoload
-(defun org-notion-search (query)
-  "Search the Notion workspace using QUERY"
+(defun org-notion-search (query &optional sort filter)
+  "Search the Notion workspace using QUERY and optional SORT and FILTER values.
+SORT should be \"ascending\" or \"descending\" and FILTER should
+be \"page\" or \"database\"."
   (interactive
    "squery: ")
   (org-notion-dispatch
    (org-notion-request
     :method 'search
-    :data query
+    :data (org-notion-search-data query sort filter)
     :callback (org-notion-with-callback
 		(when (equal (cdar json-data) "list")
 		  (let ((results (alist-get 'results json-data)))
@@ -966,6 +1059,14 @@ headline at POM first, then buffer keywords."
   (if-let ((id (or uuid (org-notion-id-at-point))))
 	(browse-url (format "https://www.notion.so/%s" id))
       (message "failed to find %s" org-notion-id-property)))
+
+(defun org-notion-push (&optional buf create)
+  "Push the current headline to Notion. If BUF is non-nil push the
+entire buffer. If CREATE is non-nil also create new objects.")
+
+(defun org-notion-pull (&optional buf)
+  "Pull and update the current headline from Notion. If BUF is
+non-nil pull updates for entire buffer.")
 
 (provide 'org-notion)
 ;;; org-notion.el ends here

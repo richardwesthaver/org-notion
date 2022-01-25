@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2022-01-20
+#+DATE: 2022-01-24
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
@@ -67,10 +67,9 @@ haven't already. This will generate a new Internal Integration Token
 which is used to authenticate API requests from Emacs.
 
 When running a command for the first time such as
-=org-notion-get-users= you will be prompted for your token. This sets
-the variable =org-notion-token= which will be used for proceeding
-calls but will not persist across sessions (after restarting the emacs
-daemon).
+=org-notion-get-users= you will be prompted for your token. This is
+cached internally for future calls but will not persist across
+sessions (after restarting the emacs daemon).
 
 The default behavior is to first check with [[https://www.gnu.org/software/emacs/manual/html_mono/auth/index.html][auth-sources]] before
 sending requests (=~/.authinfo= or =~/.authinfo.gpg=). This is highly
@@ -79,6 +78,26 @@ disable the check if you wish to temporarily use a different token
 with =(setq org-notion-check-auth-source nil)=.
 
 * Usage
+The autoloaded functions in this package provide the high-level
+interface. Most notable of these is =org-notion-mode=, which is a
+minor-mode you can add as a hook to =org-mode=.
+
+#+begin_src emacs-lisp
+  (add-hook 'org-mode-hook #'org-notion-mode)
+#+end_src
+
+You can customize the keymap =org-notion-mode-map= to your liking. The
+defauls are show below.
+
+#+tblname: org-notion-mode-map
+| key       | function            | description                     |
+|-----------+---------------------+---------------------------------|
+| C-c n P   | org-notion-push     | Push local changes to Notion    |
+| C-c n F   | org-notion-pull     | Pull remote changes from Notion |
+| C-c n o   | org-notion-browse   | Open Notion page in browser     |
+| C-c n r u | org-notion-get-user | Get Notion Users                |
+| C-c n r s | org-notion-search   | Search Notion                   |
+
 
 * Examples
 ** GTD
@@ -99,9 +118,16 @@ with =(setq org-notion-check-auth-source nil)=.
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
 
 * COMMENT notes
+- [0/2] reached 1k LOC milestone <2022-01-24 Mon>
+  - [ ] refactoring
+  - [ ] update readme
+  - [ ] update tests
+  - [ ] pull/push
+
 #+begin_comment
 Local variables:
 mode: org
+
 time-stamp-pattern: "4/#\\+DATE: %Y-%02m-%02d$"
 end:
 #+end_comment
