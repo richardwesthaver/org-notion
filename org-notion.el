@@ -148,10 +148,15 @@ completion is offered.
   :type 'hook
   :group 'org-notion)
 
+(defcustom org-notion-keymap-prefix "C-c n"
+  "Prefix for org-notion-mode keybinds."
+  :type 'string
+  :group 'org-notion)
+
 ;;; Vars
 
 (defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
-  "URI of Notion API endpoint")
+    "URI of Notion API endpoint")
 
 (defvar org-notion-id-property "NOTION_ID"
   "Name of NOTION_ID Org-mode property.")
@@ -350,6 +355,93 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 
 ;;;; Requests
 
+(defun org-notion-search-data (query &optional sort filter start_cursor page_size)
+  "Prepare data for Notion search request. Return a json object.
+
+QUERY is a string (can be empty).
+SORT is either \"ascending\" or \"descending\".
+FILTER is either \"page\" or \"database\".
+START AND PAGE_SIZE are integers."
+  (let (data)
+    (push `(query . ,query) data)
+    (when sort
+      (if (and (stringp sort)
+	       (or (string= sort "ascending")
+		   (string= sort "descending")))
+	  (nconc data `((sort . ((direction . ,sort) (timestamp . "last_edited_time")))))
+	(org-notion-log "SORT must be either 'ascending' or 'descending'")))
+    (when filter
+      (if (and (stringp filter)
+	       (or (string= filter "page")
+		   (string= filter "database"))) 
+	  (nconc data `((filter . ((value . ,filter) (property . "object")))))
+	(org-notion-log "FILTER must be either 'page' or 'database'")))
+    (when start_cursor
+      (if (org-notion-uuid-p start)
+	  (nconc data `((start_cursor . ,start_cursor)))
+	(org-notion-log "START_CURSOR must be a valid UUID")))
+    (when page_size
+      (if (and (integerp page_size)
+	       (>= org-notion-max-page-size page_size))
+	  (nconc data `((page_size . ,page_size)))
+	(org-notion-log
+	 (format "PAGE_SIZE must be an integer less than or equal to %s"
+		 org-notion-max-page-size))))
+    data))
+
+(defun org-notion-database-create-data (parent properties &optional title)
+  "Prepare data for Notion create-database request. Return a json object."
+  (let (data)
+    (push `(parent . ,parent) data)
+    (nconc data `((properties . ,properties)))
+    (when title
+      (if (stringp title)
+	  (nconc data `((title . ,title)))
+	(org-notion-log "TITLE must be a string.")))
+    data))
+
+(defun org-notion-database-update-data (database_id &optional title properties)
+  "Prepare data for Notion update-database request. Return a json object."
+  (let (data)
+    (push `(database_id . ,database_id) data)
+    (when title
+      (if (stringp title)
+	  (nconc data `((title . ,title)))
+	(org-notion-log "TITLE must be a string.")))
+    (when properties)
+    data))
+
+(defun org-notion-database-query-data (database_id &optional sorts filter start_cursor page_size)
+  "Prepare data for Notion query-database request. Return a json object."
+  (let (data)
+    (push `(database_id . ,database_id) data)
+    (when sorts)
+    (when filter)
+    (when start_cursor
+      (if (org-notion-uuid-p start_cursor)
+	  (nconc data `((start_cursor . ,start_cursor)))
+	(org-notion-log "START_CURSOR must be a valid UUID.")))
+    (when page_size
+      (if (and (integerp page_size)
+	       (>= org-notion-max-page-size page_size))
+	  (nconc data `((page_size . ,page_size)))
+	(org-notion-log
+	 (format "PAGE_SIZE must be an integer less than or equal to %s"
+		 org-notion-max-page-size))))
+    data))
+
+(defun org-notion-page-create-data (parent properties &optional children icon cover)
+  "Prepare data for Notion create-page request. Return a json object."
+  (let (data)
+    (push `(parent . ,parent) data)
+    (nconc data `((properties . ,properties)))
+    (when children)
+    (when icon)
+    (when cover)
+    data))
+
+(defun org-notion-block-data ())
+
 ;; Stand-alone class for making HTTP requests to the Notion API.
 (defclass org-notion-request (org-notion-class)
   ((token
@@ -482,48 +574,6 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 	       (url (concat endpoint "blocks/%s" data)))
 	   (url-retrieve url callback nil nil nil)))
 	(_ (signal 'org-notion-invalid-method method))))))
-
-(defun org-notion-search-data (query &optional sort filter start page_size)
-  "Prepare data for Notion search. Returns a list where car is
-QUERY string and cdr is a json object containing optional values.
-
-SORT is either \"ascending\" or \"descending\".
-FILTER is either \"page\" or \"database\".
-START AND PAGE_SIZE are integers."
-  (let (data)
-    (push `(query . ,query) data)
-    (when sort
-      (if (and (stringp sort)
-	       (or (string= sort "ascending")
-		   (string= sort "descending")))
-	  (nconc data `((sort . ((direction . ,sort) (timestamp . "last_edited_time")))))
-	(org-notion-log "SORT must be either 'ascending' or 'descending'")))
-    (when filter
-      (if (and (stringp filter)
-	       (or (string= filter "page")
-		   (string= filter "database"))) 
-	  (nconc data `((filter . ((value . ,filter) (property . "object")))))
-	(org-notion-log "FILTER must be either 'page' or 'database'")))
-    (when page_size
-      (if (and (integerp page_size)
-	       (>= org-notion-max-page-size page_size))
-	  (nconc data `((page_size . ,page_size)))
-	(org-notion-log
-	 (format "PAGE_SIZE must be an integer less than or equal to %s"
-		 org-notion-max-page-size))))
-    (when start
-      (if (org-notion-uuid-p start)
-	  (nconc data `((start_cursor . ,start)))
-	(org-notion-log "START must be a valid UUID")))
-    data))
-
-(defun org-notion-database-data ())
-
-(defun org-notion-database-query-data ())
-
-(defun org-notion-page-data ())
-
-(defun org-notion-block-data ())
 
 ;;;; Cache
 
@@ -1117,6 +1167,25 @@ entire buffer. If CREATE is non-nil also create new objects."
   "Pull and update the current headline from Notion. If BUF is
 non-nil pull updates for entire buffer."
   (interactive))
+
+;;; Minor-mode
+
+(defun org-notion--kbd (key)
+  "Convert KEY to internal Emacs key representation with `org-notion-keymap-prefix'"
+  (kbd (concat org-notion-keymap-prefix " " key)))
+
+(define-minor-mode org-notion-mode
+  "Toggle org-notion minor-mode."
+  nil
+  :global nil
+  :group 'org-notion
+  :lighter " notion"
+  :keymap
+  (list	(cons (org-notion--kbd "p") #'org-notion-push)
+	(cons (org-notion--kbd "f") #'org-notion-pull)
+	(cons (org-notion--kbd "o") #'org-notion-browse)
+	(cons (org-notion--kbd "s") #'org-notion-search)
+	(cons (org-notion--kbd "r u") #'org-notion-get-users)))
 
 (provide 'org-notion)
 ;;; org-notion.el ends here

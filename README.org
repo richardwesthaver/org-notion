@@ -30,15 +30,32 @@ of 2021 the official API is available and ready for action.
 This package wraps the full Notion API with support for all web
 requests and object types. The requests are dispatched asynchronously
 via the methods specializing on the =org-notion-request= EIEIO class
-instance. The responses are parsed to create a subclass of
-=org-notion-object=. This is the low-level interface which can be
-hacked to your liking.
+instance. The responses are parsed to create a subclass instance of
+=org-notion-object= which contain the actual contents as
+=org-notion-rich-text= instances. This is the low-level interface
+which can be hacked to your liking.
 
-The Org-mode integration is achieved with the help of the
-=org-element= API which is used to translate Org syntax to Notion
-syntax via =org-notion-rich-text= subclasses and vice-versa. An
+All classes are shown below. There's an abstract =org-notion-class=
+which all classes inherit as well as a special =org-notion-cache=
+class which stores a cache of =org-notion-object= instances.
+#+begin_example
+org-notion-class                      
+  +--org-notion-request               
+  +--org-notion-cache                 
+  +--org-notion-object           
+  |    +--org-notion-block       
+  |    +--org-notion-page        
+  |    +--org-notion-database    
+  |    +--org-notion-user        
+  +--org-notion-rich-text             
+  |    +--org-notion-inline-equation  
+  |    +--org-notion-inline-mention   
+  |    +--org-notion-inline-text      
+#+end_example
+
+The parsing is achieved with the help of [[https://orgmode.org/worg/dev/org-element-api.html][org-element]] and [[https://github.com/emacs-mirror/emacs/blob/master/lisp/json.el][json.el]]. An
 =org-notion-mode= minor-mode is provided for interacting with the API
-from auto-loaded functions and custom properties are used to keep
+from an Org buffer and custom properties are used to keep
 headlines/files in sync with their Notion counterparts.
 
 * Installation
@@ -92,16 +109,12 @@ defauls are show below.
 #+tblname: org-notion-mode-map
 | key       | function            | description                     |
 |-----------+---------------------+---------------------------------|
-| C-c n P   | org-notion-push     | Push local changes to Notion    |
-| C-c n F   | org-notion-pull     | Pull remote changes from Notion |
+| C-c n p   | org-notion-push     | Push local changes to Notion    |
+| C-c n f   | org-notion-pull     | Pull remote changes from Notion |
 | C-c n o   | org-notion-browse   | Open Notion page in browser     |
-| C-c n r u | org-notion-get-user | Get Notion Users                |
 | C-c n r s | org-notion-search   | Search Notion                   |
+| C-c n r u | org-notion-get-user | Get Notion Users                |
 
-
-* Examples
-** GTD
-** Links
 
 * Resources
 - Notion
@@ -118,9 +131,9 @@ defauls are show below.
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
 
 * COMMENT notes
-- [0/2] reached 1k LOC milestone <2022-01-24 Mon>
-  - [ ] refactoring
-  - [ ] update readme
+- [2/4] reached 1k LOC milestone <2022-01-24 Mon>
+  - [X] refactoring
+  - [X] update readme
   - [ ] update tests
   - [ ] pull/push
 
