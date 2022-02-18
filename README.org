@@ -76,7 +76,7 @@ Now you can load the package with:
   (require 'org-notion)
 #+end_src
 
-This package will be uploaded to ELPA upon reaching v1.0.0.
+This package will be uploaded to MELPA upon reaching v1.0.0.
 
 * Configuration
 You should create a [[https://www.notion.so/my-integrations][private integration]] on the Notion side if you
