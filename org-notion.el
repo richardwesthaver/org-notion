@@ -26,6 +26,8 @@
 
 ;;; Code:
 
+(require 'org)
+(require 'eieio)
 (require 'auth-source)
 (require 'json)
 (require 'url)
