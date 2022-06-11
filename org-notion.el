@@ -1,10 +1,11 @@
 ;;; org-notion.el --- Notion.so + Org-mode  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2021  ellis
+;; Copyright (C) 2022  ellis
 
 ;; Author: ellis <ellis@rwest.io>
 ;; Version: 0.1.0
 ;; Keywords: wp, extensions
+;; Package-Requires: ((emacs "28.1"))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -25,7 +26,7 @@
 ;; convenience of Notion with your Org-mode workflow. 
 
 ;;; Code:
-
+(require 'cl-lib)
 (require 'org)
 (require 'eieio)
 (require 'auth-source)
