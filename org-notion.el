@@ -24,6 +24,8 @@
 
 ;; org-notion is a simple package that integrates the beauty and
 ;; convenience of Notion with your Org-mode workflow. 
+;; 
+;; 
 
 ;;; Code:
 (require 'cl-lib)
@@ -303,7 +305,9 @@ headline at POM first, then buffer keywords."
 	     (org-notion-log (format "HTTP %d: %s"
 				     (alist-get 'status json-data)
 				     (alist-get 'message json-data)))
-	   ,@body)))))
+	   ,@body
+	   json-data)))))
+
 
 (defun org-notion-callback-default ()
   "Read json string from `org-notion-dispatch' status buffer and print output"
@@ -579,7 +583,6 @@ START AND PAGE_SIZE are integers."
 	(_ (signal 'org-notion-invalid-method method))))))
 
 ;;;; Cache
-
 (defsubst org-notion-objects (&optional class)
   "Return a list of all org-notion class instances. if CLASS is
 given, only show instances of this class."
@@ -769,10 +772,38 @@ a bot. Identified by the `:id' slot.")
     (error "expected user object, found %s" (alist-get 'object json)))
   obj)
 
-(cl-defmethod org-notion-to-json ((obj org-notion-user)))
+(cl-defmethod org-notion-to-json ((obj org-notion-user))
+  (with-slots (id type name avatar email owner) obj
+    (list (cons 'object "user") (cons 'id id) (cons 'name name) (cons 'avatar_url avatar)
+	  (cons 'type type))))
 
+(cl-defmethod org-notion-to-org ((obj org-notion-user) &optional type)
+  (with-slots (id usr-type name avatar email owner) obj
+    (let* ((usr-str (format "%s%s" name (if email (format " <%s>" email) "")))
+	   (usr-kw `(:key "NOTION_USER" :value ,usr-str))
+	   (id-kw `(:key "NOTION_ID" :value ,id))
+	   (em-kw `(:key "NOTION_EMAIL" :value ,email))
+	   (av-kw `(:key "NOTION_AVATAR_URL" :value ,avatar))
+	   (props (unless (not '(id avatar email))
+		    `(property-drawer nil (,(if email (node-property ,em-kw))
+					   ,(if id (node-property ,id-kw))
+					   ,(if avatar (node-property ,av-kw)))))))
+    (pcase type
+      ('kw (org-element-interpret-data `(keyword ,usr-kw)))
+      ('prop (org-element-interpret-data
+	      `(node-property ,usr-kw)))
+      ('headline (org-element-interpret-data
+		  `(headline
+		    (:title ,name :level 1)
+		    ,props)))
+      (_ (error "invalid org-element type %s" type))))))
+
+(cl-defmethod org-notion-from-org ((ob org-notion-user) &optional str)
+  (with-slots (id usr-type name avatar email owner) obj
+    
+    )
+  )
 ;;;;; Database
-
 (defclass org-notion-database (org-notion-object)
   ((title
     :initform ""
@@ -909,7 +940,7 @@ slot.")
     (pcase type
       ((or 'nil 'headline) (org-element-interpret-data
 			    `(headline
-			      (:title "mock" :level 1 ; FIXME
+			      (:title "" :level 1 ; FIXME
 				      :CREATED (org-notion-to-org-time created)
 				      :UPDATED (org-notion-to-org-time updated))
 			      (property-drawer nil ((node-property (:key "NOTION_ID" :value ,id))
@@ -917,7 +948,6 @@ slot.")
 						    (node-property (:key "UPDATED" :value ,updated)))))))
       ('file (org-element-interpret-data
 	      `(org-data nil (section nil)
-			 (keyword (:key "TITLE" :value "org-notion"))
 			 (keyword (:key "NOTION_ID" :value ,id))
 			 (keyword (:key "CREATED" :value ,created))
 			 (keyword (:key "UPDATED" :value ,updated)))))
@@ -1100,7 +1130,7 @@ slot.")
   :documentation "Notion inline equation object found in
 `org-notion-rich-text' of type 'equation'.")
 
-;;; API Commands
+;;; API Calls
 
 ;;;###autoload
 (defun org-notion-get-current-user ()
@@ -1114,7 +1144,8 @@ slot.")
 		(when (equal (cdar json-data) "user")
 		  (org-notion-log (format "current user: %s\nid: %s"
 					  (alist-get 'name json-data)
-					  (alist-get 'id json-data))))))))
+					  (alist-get 'id json-data))))
+		json-data))))
 
 ;;;###autoload
 (defun org-notion-get-users ()
@@ -1147,14 +1178,14 @@ be \"page\" or \"database\"."
     :callback (org-notion-with-callback
 		(when (equal (cdar json-data) "list")
 		  (let ((results (alist-get 'results json-data)))
-		    (org-notion-log results)))))))
+		    results))))))
 
 ;;; Org-mode Commands
 
 ;;;###autoload
 (defun org-notion-browse (&optional uuid)
   "Open a Notion page by UUID."
-  (interactive)
+  (interactive "sID: ")
   (if-let ((id (or uuid (org-notion-id-at-point))))
       (browse-url (format "https://www.notion.so/%s" id))
     (message "failed to find %s" org-notion-id-property)))

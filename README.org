@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2022-01-24
+#+DATE: 2022-08-28
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
@@ -136,11 +136,3 @@ defauls are show below.
   - [X] update readme
   - [ ] update tests
   - [ ] pull/push
-
-#+begin_comment
-Local variables:
-mode: org
-
-time-stamp-pattern: "4/#\\+DATE: %Y-%02m-%02d$"
-end:
-#+end_comment
