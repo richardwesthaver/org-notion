@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2022-08-28
+#+DATE: 2022-10-16
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
@@ -131,8 +131,5 @@ defauls are show below.
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
 
 * COMMENT notes
-- [2/4] reached 1k LOC milestone <2022-01-24 Mon>
-  - [X] refactoring
-  - [X] update readme
-  - [ ] update tests
-  - [ ] pull/push
+** tasks
+*** TODO implement to/from-json and to/from-org

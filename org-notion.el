@@ -189,6 +189,10 @@ completion is offered.
 
 (defvar org-notion-verbosity 'debug)
 
+(defvar org-notion-current-user nil
+  "Current Notion user. This may be a user created via Notion API
+integration.")
+
 ;;; Errors
 
 (define-error 'org-notion-error "Unknown org-notion error")
@@ -232,8 +236,7 @@ completion is offered.
   (and (stringp str1) (stringp str2)
        (eq t (compare-strings str1 0 nil str2 0 nil t))))
 
-;;;; ID Utils
-
+;; id utils
 (defun org-notion-uuid-p (str)
   "Return t if STR is a uuid, else nil."
   (and (stringp str)
@@ -250,8 +253,7 @@ completion is offered.
   (and (org-notion-uuid-p id1) (org-notion-uuid-p id2)
        (eq t (compare-strings id1 0 nil id2 0 nil))))
 
-;;;; Org Utils
-
+;; org utils
 (if (fboundp 'org-link-set-parameters)
     (org-link-set-parameters "notion"
 			     :follow 'org-notion-browse
@@ -693,10 +695,11 @@ hash. The old one is always kept."
   "Update hash of THIS in cache."
   (puthash (oref this :id) this (symbol-value (oref this cache))))
 
-;;;; Generics
+;;;; Object methods
 
 ;; The following generics are implemented by `org-notion-object'
 ;; subclasses.
+
 (cl-defgeneric org-notion-from-json (obj json)
   "Interpret JSON as `org-notion-object'")
 
@@ -784,25 +787,30 @@ a bot. Identified by the `:id' slot.")
 	   (id-kw `(:key "NOTION_ID" :value ,id))
 	   (em-kw `(:key "NOTION_EMAIL" :value ,email))
 	   (av-kw `(:key "NOTION_AVATAR_URL" :value ,avatar))
-	   (props (unless (not '(id avatar email))
+	   (props (unless
+		      (not '(id avatar email))
 		    `(property-drawer nil (,(if email (node-property ,em-kw))
 					   ,(if id (node-property ,id-kw))
 					   ,(if avatar (node-property ,av-kw)))))))
-    (pcase type
-      ('kw (org-element-interpret-data `(keyword ,usr-kw)))
-      ('prop (org-element-interpret-data
-	      `(node-property ,usr-kw)))
-      ('headline (org-element-interpret-data
-		  `(headline
-		    (:title ,name :level 1)
-		    ,props)))
-      (_ (error "invalid org-element type %s" type))))))
+      (pcase type
+	((or 'nil 'heading)
+	 (org-element-interpret-data
+	  `(headline
+	    (:title ,name :level 1)
+	    ,props)))
+	('kw (org-element-interpret-data `(keyword ,usr-kw)))
+	('prop (org-element-interpret-data
+		`(node-property ,usr-kw)))
+	(_ (error "invalid org-element type %s" type))))))
 
-(cl-defmethod org-notion-from-org ((ob org-notion-user) &optional str)
+;; TODO 2022-10-17
+(cl-defmethod org-notion-from-org ((obj org-notion-user) &optional str)
   (with-slots (id usr-type name avatar email owner) obj
-    
-    )
-  )
+    (with-temp-buffer
+      (insert str)
+      (let ((org (org-element-context)))
+	org))))
+
 ;;;;; Database
 (defclass org-notion-database (org-notion-object)
   ((title
@@ -1162,7 +1170,8 @@ enabled."
 		    (dolist (i (append results nil))
 		      (org-notion-log (format "name: %s | id: %s"
 					      (alist-get 'name i)
-					      (alist-get 'id i))))))))))
+					      (alist-get 'id i))))
+		    results))))))
 
 ;;;###autoload
 (defun org-notion-search (query &optional sort filter)
