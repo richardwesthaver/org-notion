@@ -30,6 +30,7 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'org)
+(require 'org-element)
 (require 'eieio)
 (require 'auth-source)
 (require 'json)
@@ -582,7 +583,7 @@ START AND PAGE_SIZE are integers."
 	 (let ((url-request-method "DELETE")
 	       (url (concat endpoint "blocks/%s" data)))
 	   (url-retrieve url callback nil nil nil)))
-	(_ (signal 'org-notion-invalid-method method))))))
+	(_ (signal 'org-notion-invalid-method "test"))))))
 
 ;;;; Cache
 (defsubst org-notion-objects (&optional class)
@@ -777,21 +778,24 @@ a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-to-json ((obj org-notion-user))
   (with-slots (id type name avatar email owner) obj
-    (list (cons 'object "user") (cons 'id id) (cons 'name name) (cons 'avatar_url avatar)
+    (list (cons 'object "user") (cons 'id id)
+	  (cons 'name name) (cons 'avatar_url avatar)
 	  (cons 'type type))))
 
 (cl-defmethod org-notion-to-org ((obj org-notion-user) &optional type)
+  "Convert user to org-element TYPE."
   (with-slots (id usr-type name avatar email owner) obj
-    (let* ((usr-str (format "%s%s" name (if email (format " <%s>" email) "")))
+    (let* ((usr-str (format "%s %s" name (if email (format "<%s>" email))))
 	   (usr-kw `(:key "NOTION_USER" :value ,usr-str))
 	   (id-kw `(:key "NOTION_ID" :value ,id))
 	   (em-kw `(:key "NOTION_EMAIL" :value ,email))
 	   (av-kw `(:key "NOTION_AVATAR_URL" :value ,avatar))
-	   (props (unless
-		      (not '(id avatar email))
-		    `(property-drawer nil (,(if email (node-property ,em-kw))
-					   ,(if id (node-property ,id-kw))
-					   ,(if avatar (node-property ,av-kw)))))))
+	   (props
+	    (unless (not '(id avatar email))
+	      `(property-drawer
+		nil (,(if email (node-property ,em-kw))
+		     ,(if id (node-property ,id-kw))
+		     ,(if avatar (node-property ,av-kw)))))))
       (pcase type
 	((or 'nil 'heading)
 	 (org-element-interpret-data
@@ -803,13 +807,48 @@ a bot. Identified by the `:id' slot.")
 		`(node-property ,usr-kw)))
 	(_ (error "invalid org-element type %s" type))))))
 
-;; TODO 2022-10-17
 (cl-defmethod org-notion-from-org ((obj org-notion-user) &optional str)
+  "Parse STR org element into an `org-notion-user' OBJ."
   (with-slots (id usr-type name avatar email owner) obj
     (with-temp-buffer
       (insert str)
-      (let ((org (org-element-context)))
-	org))))
+      (let* ((elt (caddr (org-element-parse-buffer)))
+	     (type (car elt)))
+	(pcase type
+	  ('headline
+	   (let* ((plst (cadr elt))
+		  (p-usr (or (plist-get plst :NOTION_USER) (plist-get plst :title)))
+		  (p-id (plist-get plst :NOTION_ID))
+		  (p-email (plist-get plst :NOTION_EMAIL))
+		  (p-avatar (plist-get plst :NOTION_AVATAR_URL)))
+	     (setq user p-usr)
+	     (setq id p-id)
+	     (setq email p-email)
+	     (setq avatar p-avatar)))
+	  ('keyword
+	   (let* ((plst (cadr elt))
+		  (key (plist-get plst :key))
+		  (val (plist-get plst :value)))
+	     (pcase key
+	       ("NOTION_USER" (setq name val))
+	       ("NOTION_ID" (setq id val))
+	       ("NOTION_EMAIL" (setq email val))
+	       ("NOTION_AVATAR_URL" (setq avatar val)))))
+	  ('section
+	   (let ((keywords (nthcdr 2 elt)))
+	     (dolist (kw keywords)
+	       (if (eq (car kw) 'keyword)
+		   (let* ((plst (cadr kw))
+			  (key (plist-get plst :key))
+			  (val (plist-get plst :value)))
+		     (message "%s %s" key val)
+		     (pcase key
+		       ("NOTION_USER" (setq name val))
+		       ("NOTION_ID" (setq id val))
+		       ("NOTION_EMAIL" (setq email val))
+		       ("NOTION_AVATAR_URL" (setq avatar val))))))))
+	  (_ (error "invalid org-element type %s" type)))
+	obj))))
 
 ;;;;; Database
 (defclass org-notion-database (org-notion-object)
@@ -946,19 +985,22 @@ slot.")
 (cl-defmethod org-notion-to-org ((obj org-notion-page) &optional type)
   (with-slots (id created updated properties parent) obj
     (pcase type
-      ((or 'nil 'headline) (org-element-interpret-data
-			    `(headline
-			      (:title "" :level 1 ; FIXME
-				      :CREATED (org-notion-to-org-time created)
-				      :UPDATED (org-notion-to-org-time updated))
-			      (property-drawer nil ((node-property (:key "NOTION_ID" :value ,id))
-						    (node-property (:key "CREATED" :value ,created))
-						    (node-property (:key "UPDATED" :value ,updated)))))))
-      ('file (org-element-interpret-data
-	      `(org-data nil (section nil)
-			 (keyword (:key "NOTION_ID" :value ,id))
-			 (keyword (:key "CREATED" :value ,created))
-			 (keyword (:key "UPDATED" :value ,updated)))))
+      ((or 'nil 'headline)
+       (org-element-interpret-data
+	`(headline
+	  (:title "" :level 1		; FIXME
+		  :CREATED (org-notion-to-org-time created)
+		  :UPDATED (org-notion-to-org-time updated))
+	  (property-drawer
+	   nil ((node-property (:key "NOTION_ID" :value ,id))
+		(node-property (:key "CREATED" :value ,created))
+		(node-property (:key "UPDATED" :value ,updated)))))))
+      ('file
+       (org-element-interpret-data
+	`(org-data nil (section nil)
+		   (keyword (:key "NOTION_ID" :value ,id))
+		   (keyword (:key "CREATED" :value ,created))
+		   (keyword (:key "UPDATED" :value ,updated)))))
       (_ (error "invalid org-element type %s" type)))))
 
 ;;;;; Block
