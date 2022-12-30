@@ -26,11 +26,16 @@
 (require 'org-notion (expand-file-name "../org-notion.el"))
 (require 'ert)
 
-(defun get-results (json)
+(defun org-notion--get-results (json)
   (when (equal (cdar json) "list")
     (let ((results (alist-get 'results json)))
       (dolist (i (append results nil)))
       results)))
+
+;; TODO 2022-12-28
+(defmacro with-json-list (&rest body))
+
+(defun org-notion--get-children (json))
 
 (ert-deftest consts-ok ()
   (should (equal org-notion-version "2021-08-16"))
@@ -51,7 +56,7 @@
 (ert-deftest users-ok () (should (org-notion-get-users)))
 
 (ert-deftest user-from-json-ok ()
-  (let ((results (get-results (json-read-file "json/users.json"))))
+  (let ((results (org-notion--get-results (json-read-file "json/users.json"))))
     (org-notion-from-json (org-notion-user) (elt results 0))
     (should (org-notion-from-json (org-notion-user) (elt results 0)))))
 
@@ -60,6 +65,22 @@
 
 (ert-deftest user-to-org-ok ()
   (should (org-notion-to-org (org-notion-user) 'heading)))
+
+;; TODO 2022-12-27
+(ert-deftest user-from-org-ok ())
+
+(ert-deftest db-from-json-ok ()
+  (let ((db (json-read-file "json/database.json")))
+    (should (org-notion-from-json (org-notion-database) db))))
+
+(ert-deftest db-to-json-ok ()
+  (should (org-notion-to-json (org-notion-database))))
+
+(ert-deftest db-to-org-ok ()
+  (should (org-notion-to-org (org-notion-database) 'heading)))
+
+;; TODO 2022-12-27
+(ert-deftest db-from-org-ok ())
 
 (ert-deftest search-ok () (should (org-notion-search "org-notion")))
 

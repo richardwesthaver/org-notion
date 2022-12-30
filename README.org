@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2022-12-18
+#+DATE: 2022-12-27
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
