@@ -46,7 +46,7 @@
 
 (defconst org-notion-max-page-size 100
   "Default count of results returned by Notion. Additional calls
-will be made to collect all results using the 'start_cursor'
+will be made to collect all results using the `start_cursor'
 parameter. Maximum value is 100.")
 
 (defconst org-notion-method-types '(search current-user user
@@ -73,7 +73,7 @@ parameter. Maximum value is 100.")
 					     template link_to_page table
 					     table_row unsupported)
   "Type of blocks available for Notion API, used by
-`org-notion-block' class. 'unsupported' refers to an unsupported
+`org-notion-block' class. `unsupported' refers to an unsupported
 block type.")
 
 (defconst org-notion-color-types '(default gray brown orange
@@ -119,7 +119,8 @@ interactive prompt if token isn't found."
 
 (defcustom org-notion-completion-ignore-case t
   "org-notion specific value of `completion-ignore-case'"
-  :group 'org-notion)
+  :group 'org-notion
+  :type 'boolean)
 
 (defcustom org-notion-completion-list t
   "Control the behaviour of org-notion completion functions.
@@ -190,7 +191,7 @@ integration.")
 
 (defvar org-notion-dispatch-sync-sleep 0.05
   "Time to sleep for between checks on
-`org-notion-last-dispatch-result'. Only applies to 'synchronous'
+`org-notion-last-dispatch-result'. Only applies to synchronous
 calls to `org-notion-dispatch' (:async nil).")
 
 (defvar org-notion-last-dispatch-result nil
@@ -233,8 +234,8 @@ node-property or keyword names (:key).")
     (inline-mention . org-notion-inline-mention)
     (inline-equation . org-notion-inline-equation)
     (block . org-notion-block))
-  "Mapping of short names such as 'database to
-`org-notion-class' type names, i.e. `org-notion-database'.")
+  "Mapping of short names such as \"database\" to
+org-notion-class type names, i.e. org-notion-database.")
 
 (defvar org-notion-class-names
   (-flatten (mapcar #'(lambda (i) (car i)) org-notion-class-keys))
@@ -334,9 +335,7 @@ property-drawer."
 
 (defun org-notion--get-results (json)
   (when (equal (cdar json) "list")
-    (let ((results (alist-get 'results json)))
-      (dolist (i (append results nil)))
-      results)))
+    (alist-get 'results json)))
 
 (defun org-notion-filter-results (json-array obj-typ)
   "Filter JSON-ARRAY (an array of results from the Notion API),
@@ -369,8 +368,8 @@ property-drawer."
 (if (fboundp 'org-link-set-parameters)
     (org-link-set-parameters "notion"
 			     :follow 'org-notion-browse
-			     :complete (lambda ()
-					 (format "notion:%s"))))
+			     :complete (lambda (x)
+					 (format "notion:%s" x))))
 
 (defun org-notion-to-org-time (iso-time-str)
   "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
@@ -414,7 +413,7 @@ further processed by BODY before being returned by
 `org-notion-dispatch'."
   (declare (debug t)
 	   (indent 0))
-  `(lambda (response)
+  `(lambda (_response) ;; should probably use this
      (with-current-buffer (current-buffer)
        ;;  quick hack. url.el will always return body at this position.
        (search-forward "\n\n")
@@ -483,7 +482,7 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 QUERY is a string (can be empty).
 SORT is either \"ascending\" or \"descending\".
 FILTER is either \"page\" or \"database\".
-START AND PAGE_SIZE are integers."
+START_CURSOR is an ID and PAGE_SIZE is an integer."
   (let (data)
     (push `(query . ,query) data)
     (when sort
@@ -499,7 +498,7 @@ START AND PAGE_SIZE are integers."
 	  (nconc data `((filter . ((value . ,filter) (property . "object")))))
 	(error "FILTER must be either 'page' or 'database'")))
     (when start_cursor
-      (if (org-notion-uuid-p start)
+      (if (org-notion-uuid-p start_cursor)
 	  (nconc data `((start_cursor . ,start_cursor)))
 	(signal 'org-notion-invalid-uuid start_cursor)))
     (when page_size
@@ -736,13 +735,13 @@ PRED may take the same values as the elements of `org-notion-completion-list'."
 	   (org-notion-string= key (org-notion-id obj)))
       (throw 'org-notion-hash-ok 'id))
   (if (and (memq 'type pred)
-	   (org-notion-string= key (oref obj :type)))
+	   (org-notion-string= key (org-notion-type obj)))
       (throw 'org-notion-hash-ok 'type))
   (if (and (memq 'parent pred)
-	   (org-notion-string= key (oref obj :parent)))
+	   (org-notion-string= key (org-notion-parent obj)))
       (throw 'org-notion-hash-ok 'parent))
   (if (and (memq 'email pred)
-	   (org-notion-string= key (oref obj :email)))
+	   (org-notion-string= key (org-notion-email obj)))
       (throw 'org-notion-hash-ok 'email)))
 
 (defun org-notion-gethash (key &optional pred)
@@ -766,7 +765,7 @@ a single object, otherwise return a list.'"
 (defun org-notion-puthash (obj table)
   "Add OBJ to `org-notion-hashtable'. The key is the id slot, and
 value is OBJ. Empty or nil id slots are ignored."
-  (let ((key (oref obj :id)))
+  (let ((key (org-notion-id obj)))
     (if (and key (not (string-empty-p key)))
 	(let ((objs (gethash key table)))
 	  (puthash key (if objs
@@ -819,13 +818,13 @@ hash. The old one is always kept."
 
 (cl-defmethod delete-instance ((this org-notion-cache))
   "Remove THIS from cache."
-  (let ((id (oref this :id)))
+  (let ((id (org-notion-id this)))
   (remhash id (symbol-value (oref this cache)))
   (org-notion-log (format "removed key: %s" id))))
 
 (cl-defmethod update-instance ((this org-notion-cache))
   "Update hash of THIS in cache."
-  (puthash (oref this :id) this (symbol-value (oref this cache))))
+  (puthash (org-notion-id this) this (symbol-value (oref this cache))))
 
 ;;;; Object methods
 
@@ -864,7 +863,7 @@ hash. The old one is always kept."
     :initform ""
     :initarg :type
     :type string
-    :accessor org-notion-user-type
+    :accessor org-notion-type
     :documentation "Type of the user. This slot should be either
     'person' or 'bot'.")
    (name
@@ -882,7 +881,7 @@ hash. The old one is always kept."
     :initform nil
     :initarg :email
     :type (or null string)
-    :accessor org-notion-user-email
+    :accessor org-notion-email
     :documentation "Email address of a user. Only present if
     `:type' is 'person' and integration has user capabilities
     that allow access to email addresses.")
@@ -918,17 +917,13 @@ a bot. Identified by the `:id' slot.")
   "Convert user to org-element TYPE."
   (with-slots (id usr-type name avatar email owner) obj
     (let* ((usr-str (format "%s %s" name (if email (format "<%s>" email))))
-	   (usr-kw   (org-notion--kw 'user usr-str) ;; `(:key "NOTION_USER" :value ,usr-str)
-	    )
-	   (id-kw `(:key "NOTION_ID" :value ,id))
-	   (em-kw `(:key "NOTION_EMAIL" :value ,email))
-	   (av-kw `(:key "NOTION_AVATAR" :value ,avatar))
+	   (usr-kw   (org-notion--kw 'user usr-str))
 	   (props
 	    (unless (not '(id avatar email))
-	      `(property-drawer
-		nil (,(if email (node-property ,em-kw))
-		     ,(if id (node-property ,id-kw))
-		     ,(if avatar (node-property ,av-kw)))))))
+	      (org-notion-property-drawer
+	       `((id . ,id)
+		 (email . ,email)
+		 (avatar . ,avatar))))))
       (pcase type
 	((or 'nil 'heading)
 	 (org-element-interpret-data
@@ -954,7 +949,7 @@ a bot. Identified by the `:id' slot.")
 		  (p-id (plist-get plst :NOTION_ID))
 		  (p-email (plist-get plst :NOTION_EMAIL))
 		  (p-avatar (plist-get plst :NOTION_AVATAR)))
-	     (setq user p-usr)
+	     (setq name p-usr)
 	     (setq id p-id)
 	     (setq email p-email)
 	     (setq avatar p-avatar)))
@@ -1021,6 +1016,7 @@ a bot. Identified by the `:id' slot.")
    (parent
     :initform nil
     :initarg :parent
+    :accessor org-notion-parent
     :type (or list null)
     :documentation "The parent of this database. Value is a cons cell (TYPE . ID).")
    (url
@@ -1067,31 +1063,24 @@ a bot. Identified by the `:id' slot.")
 (cl-defmethod org-notion-to-org ((obj org-notion-database) &optional type)
   "Convert database to org-element TYPE."
   (with-slots (id title created updated icon cover properties parent url) obj
-    (let* ((id-kw `(:key "NOTION_ID" :value ,id))
-	   (icon-kw `(:key "NOTION_ICON_URL" :value ,icon))
-	   (cover-kw `(:key "NOTION_COVER_URL" :value ,cover))
-	   (created-kw `(:key "CREATED" :value ,created))
-	   (updated-kw `(:key "UPDATED" :value ,updated))
-	   (url-kw `(:key "NOTION_URL" :value ,url))
-	   (props
+    (let ((props
 	    (unless (not '(id cover icon))
-	      `(property-drawer
-		nil (,(if icon (node-property ,icon-kw))
-		     ,(if id (node-property ,id-kw))
-		     ,(if cover (node-property ,cover-kw))
-		     ;; TODO 2022-12-28: 
-		     ;; ,(if created (node-property ,created-kw))
-		     ;; ,(if updated (node-property ,updated-kw))
-		     ,(if url `(node-property ,url-kw)))))))
+	      (org-notion-property-drawer
+	       `((id . ,id)
+		 (icon . ,icon)
+		 (cover . ,cover)
+		 (created . ,created)
+		 (updated . ,updated)
+		 (url . ,url))))))
       (pcase type
 	((or 'nil 'heading)
 	 (org-element-interpret-data
 	  `(headline
 	    (:title ,title :level 1)
 	    ,props)))
-	('kw (org-element-interpret-data `(keyword ,id-kw)))
+	('kw (org-element-interpret-data (org-notion--prop 'id id 'kw)))
 	('prop (org-element-interpret-data
-		`(node-property ,id-kw)))
+		(org-notion--prop 'id id)))
 	('table nil)
 	(_ (error 'org-notion-invalid-element-type type))))))
 
@@ -1177,6 +1166,7 @@ a bot. Identified by the `:id' slot.")
    (parent
     :initform nil
     :initarg :parent
+    :accessor org-notion-parent
     :type (or list null)
     :documentation "The parent id of this page. Can be a database,
     page, or workspace.")
@@ -1195,7 +1185,7 @@ slot.")
 	(oset obj :id (alist-get 'id json))
 	(oset obj :created (alist-get 'created_time json))
 	(oset obj :updated (alist-get 'last_edited_time json))
-	(oset obj :archived ( (alist-get 'archived json) t))
+	(oset obj :archived (when (alist-get 'archived json) t))
 	(oset obj :icon (alist-get 'icon json))
 	(oset obj :cover (alist-get 'cover json))
 	(oset obj :parent (org-notion-parse-parent json))
@@ -1205,7 +1195,7 @@ slot.")
     (error "expected page object, found %s" (alist-get 'object json)))
   obj)
 
-(cl-defmethod org-notion-from-org ((obj org-notion-page) str))
+;; (cl-defmethod org-notion-from-org ((obj org-notion-page) str))
 
 (cl-defmethod org-notion-to-org ((obj org-notion-page) &optional type)
   (with-slots (id created updated properties parent archived icon cover url) obj
@@ -1246,8 +1236,9 @@ slot.")
 
 (defclass org-notion-block (org-notion-object)
   ((type
-    :initform unsupported
+    :initform 'unsupported
     :initarg :type
+    :accessor org-notion-type
     :type symbol
     :documentation "Type of block. See variable
     `org-notion-block-types' for possible values.")
@@ -1298,7 +1289,7 @@ slot.")
 	(oset obj :updated (alist-get 'last_edited_time json))
 	(oset obj :archived (unless (alist-get 'archived json) t))
 	(oset obj :has_children (unless (alist-get 'has_children json) t))
-	(pcase (oref obj :type)
+	(pcase (org-notion-type obj)
 	  ('paragraph ()) 		; text
 	  ('heading_1 ()) 		; text
 	  ('heading_2 ()) 		; text
@@ -1339,9 +1330,8 @@ slot.")
   (cache-instance obj)
   obj)
 
-(cl-defmethod org-notion-to-json ((obj org-notion-block)))
-
-(cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _))
+;; (cl-defmethod org-notion-to-json ((obj org-notion-block)))
+;; (cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _))
 
 ;;;;; Text
 
@@ -1352,6 +1342,7 @@ slot.")
   ((type
     :initform "text"
     :initarg :type
+    :accessor org-notion-type
     :type string
     :documentation "Type of this rich text object. Possible
     values are: 'text', 'mention', 'equation'")
@@ -1374,17 +1365,17 @@ slot.")
     text. See `org-notion-annotation-types' for a list of
     possible values.")
    (color
-    :initform default
+    :initform 'default
     :initarg :color
     :type symbol
     :documentation "Color that applies to this rich text. See
     `org-notion-color-types' for a list of possible values."))
   :documentation "Notion rich text object.")
 
-(cl-defmethod org-notion-from-json ((obj (subclass org-notion-rich-text))))
-(cl-defmethod org-notion-to-json ((obj (subclass org-notion-rich-text))))
-(cl-defmethod org-notion-from-org ((obj (subclass org-notion-rich-text)) str))
-(cl-defmethod org-notion-to-org ((obj (subclass org-notion-rich-text)) &optional type))
+;; (cl-defmethod org-notion-from-json ((obj (subclass org-notion-rich-text))))
+;; (cl-defmethod org-notion-to-json ((obj (subclass org-notion-rich-text))))
+;; (cl-defmethod org-notion-from-org ((obj (subclass org-notion-rich-text)) str))
+;; (cl-defmethod org-notion-to-org ((obj (subclass org-notion-rich-text)) &optional type))
 
 (defclass org-notion-inline-text (org-notion-rich-text)
   ((content
@@ -1462,7 +1453,7 @@ SORT should be \"ascending\" or \"descending\" and FILTER should
 be \"page\" or \"database\"."
   (interactive
    "squery: ")
-  (let ((res))
+  (let ((_res))
     (org-notion-dispatch
      (org-notion-request
       :method 'search
@@ -1473,6 +1464,8 @@ be \"page\" or \"database\"."
 		      (org-notion-log results)
 		      (setq org-notion-last-dispatch-result results))))))))
 
+;;;###autoload
+
 ;;; Org-mode Commands
 
 ;;;###autoload
@@ -1480,20 +1473,20 @@ be \"page\" or \"database\"."
   "Open a Notion page by UUID."
   (interactive "sID: ")
   (if-let ((id (or uuid (org-notion-id-at-point))))
-      (browse-url (format "https://www.notion.so/%s" id))
-    (message "failed to find %s" org-notion-id-property)))
+              (browse-url (format "https://www.notion.so/%s" id))
+        (message "failed to find %s" org-notion-id-property)))
 
 ;;;###autoload
-(defun org-notion-push (&optional buf create)
-  "Push the current headline to Notion. If BUF is non-nil push the
-entire buffer. If CREATE is non-nil also create new objects."
-  (interactive))
+;; (defun org-notion-push (&optional buf create)
+;;   "Push the current headline to Notion. If BUF is non-nil push the
+;; entire buffer. If CREATE is non-nil also create new objects."
+;;   (interactive))
 
 ;;;###autoload
-(defun org-notion-pull (&optional buf)
-  "Pull and update the current headline from Notion. If BUF is
-non-nil pull updates for entire buffer."
-  (interactive))
+;; (defun org-notion-pull (&optional buf)
+;;   "Pull and update the current headline from Notion. If BUF is
+;; non-nil pull updates for entire buffer."
+;;   (interactive))
 
 ;;; Minor-mode
 
