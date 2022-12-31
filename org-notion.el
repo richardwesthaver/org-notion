@@ -551,7 +551,7 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
 		 org-notion-max-page-size))))
     data))
 
-(defun org-notion-page-create-data (parent properties &optional children icon cover)
+(defun org-notion-page-data (parent properties &optional children icon cover)
   "Prepare data for Notion create-page request. Return a json object."
   (let (data)
     (push `(parent . ,parent) data)
@@ -586,7 +586,7 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
    (data
     :initform nil
     :initarg :data
-    :type (or null list)
+    :type (or null list string)
     :documentation "Payload to be sent with HTTP request.")
    (callback
     :initform (org-notion-callback-default)
@@ -1151,12 +1151,12 @@ a bot. Identified by the `:id' slot.")
    (icon
     :initform nil
     :initarg :icon
-    :type (or null string)
+    :type (or null string list)
     :documentation "Page icon.")
    (cover
     :initform nil
     :initarg :cover
-    :type (or null string)
+    :type (or null string list)
     :documentation "Page cover image.")
    (properties
     :initarg :properties
@@ -1290,8 +1290,12 @@ slot.")
 	(oset obj :archived (unless (alist-get 'archived json) t))
 	(oset obj :has_children (unless (alist-get 'has_children json) t))
 	(pcase (org-notion-type obj)
-	  ('paragraph ()) 		; text
-	  ('heading_1 ()) 		; text
+	  ('paragraph
+	   (let* ((content (alist-get 'paragraph json))
+		  (res (org-notion-rich-text
+			:color (intern (alist-get 'color content)))))
+	     (oset obj :text (vector res))
+	     ))
 	  ('heading_2 ()) 		; text
 	  ('heading_3 ()) 		; text
 	  ('bulleted_list_item ()) 	; text + children
@@ -1463,8 +1467,6 @@ be \"page\" or \"database\"."
 		    (let ((results (alist-get 'results json-data)))
 		      (org-notion-log results)
 		      (setq org-notion-last-dispatch-result results))))))))
-
-;;;###autoload
 
 ;;; Org-mode Commands
 
