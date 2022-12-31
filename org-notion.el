@@ -181,31 +181,63 @@ completion is offered.
 (defvar org-notion-block-cache (make-hash-table :test #'equal)
   "Cache of Notion blocks.")
 
-(defvar org-notion-request-buffer "org-notion-proc"
-  "Name of the org-notion request process buffer.")
-
-(defvar org-notion-verbosity 'debug)
+(defvar org-notion-verbosity 'debug
+  "Level of verbosity for `org-notion' logging.")
 
 (defvar org-notion-current-user nil
   "Current Notion user. This may be a user created via Notion API
 integration.")
 
-;;;  TODO 2022-12-30: don't need this. see below.
-(defvar org-notion-last-search-result nil
-  "raw value of last `org-notion-search' call.")
+(defvar org-notion-dispatch-sync-sleep 0.05
+  "Time to sleep for between checks on
+`org-notion-last-dispatch-result'. Only applies to 'synchronous'
+calls to `org-notion-dispatch' (:async nil).")
 
 (defvar org-notion-last-dispatch-result nil
   "value of last `org-notion-dispatch' call.")
 
-(defvar org-notion-current-dispatch-buffer nil
-  "value of current `org-notion-dispatch' process buffer.")
+(defvar org-notion-field-org-keys
+  '((id . "NOTION_ID")
+    (user . "NOTION_USER")
+    (email . "NOTION_EMAIL")
+    (cover . "NOTION_COVER")
+    (icon . "NOTION_ICON")
+    (created . "CREATED")
+    (updated . "UPDATED")
+    (parent . "NOTION_PARENT")
+    (archived . "NOTION_ARCHIVED")
+    (url . "NOTION_URL")
+    (link . "NOTION_LINK")
+    (content . "NOTION_CONTENT")
+    (mention-type . "NOTION_MENTION")
+    (expression . "NOTION_EXPRESSION")
+    (href . "NOTION_HREF")
+    (annotations . "NOTION_ANNOTATIONS")
+    (color . "NOTION_COLOR")
+    (properties . "NOTION_PROPERTIES")
+    (children . "NOTION_CHILDREN")
+    (text . "NOTION_TEXT")
+    (type . "NOTION_TYPE"))
+  "Mapping of org-notion EIEIO field names to org-element
+node-property or keyword names (:key).")
 
-;; TODO 2022-12-28
-(defvar org-notion-class-types '(((db database) . org-notion-database)
-				 ((user usr) . org-notion-user))
-  "Mapping of short names  such as 'database or 'db to `org-notion-class' type names, i.e. `org-notion-database'.")
+(defvar org-notion-field-names (mapcar #'car org-notion-field-org-keys)
+  "L1 field short names.")
 
-(defvar org-notion-class-abbrevs (-flatten (mapcar #'(lambda (i) (car i)) org-notion-class-types))
+(defvar org-notion-class-keys
+  '((database . org-notion-database)
+    (user . org-notion-user)
+    (page . org-notion-page)
+    (rich-text . org-notion-rich-text)
+    (inline-text . org-notion-inline-text)
+    (inline-mention . org-notion-inline-mention)
+    (inline-equation . org-notion-inline-equation)
+    (block . org-notion-block))
+  "Mapping of short names such as 'database to
+`org-notion-class' type names, i.e. `org-notion-database'.")
+
+(defvar org-notion-class-names
+  (-flatten (mapcar #'(lambda (i) (car i)) org-notion-class-keys))
   "`org-notion-class' type abbreviations.")
 
 ;;; Errors
@@ -229,10 +261,15 @@ integration.")
 
 ;;; Utils
 
-(defun org-notion-log (&rest s) (message "%s" s))
-(defun org-notion-dbg (&rest s) (when (or (eq org-notion-verbosity t)
-					  (eq org-notion-verbosity 'debug))
-				  (princ s)))
+(defun org-notion-log (&rest s)
+  "Log a message."
+  (message "%s" s))
+
+(defun org-notion-dbg (&rest s)
+  "Print an object."
+  (when (or (eq org-notion-verbosity t)
+	    (eq org-notion-verbosity 'debug))
+    (princ s)))
 
 (defmacro oref-or (obj slot)
   "Get the value of object or class."
@@ -247,6 +284,64 @@ integration.")
   `(cond
     ((class-p ,obj) (eieio-oset-default ,obj ',slot ,value))
     ((eieio-object-p ,obj) (eieio-oset ,obj ',slot ,value))))
+
+(defun org-notion-field-get (sym)
+  "Return the org-element property key name (a string) associated
+with SYM in `org-notion-field-org-keys'."
+  (alist-get sym org-notion-field-org-keys))
+
+(defun org-notion-class-get (sym)
+  "Return the org-element property key name (a string) associated
+with SYM in `org-notion-class-keys'."
+  (alist-get sym org-notion-class-keys))
+
+(defun org-notion--kv (key val)
+  `(:key ,key :value ,val))
+
+(defun org-notion--node-prop (key val)
+  "Create an org-element node-property given KEY and VAL"
+  (cons 'node-property (org-notion--kv key val)))
+
+(defun org-notion--kw (key val)
+  "Create an org-element keyword given KEY and VAL."
+  (cons 'keyword (org-notion--kv key val)))
+
+(defun org-notion--prop (key val &optional type)
+  "Create an org-element TYPE given KEY and VAL.
+KEY is looked up in `org-notion-field-org-keys' and "
+  (pcase type
+    ((or 'kw 'keyword) (org-notion--kw (org-notion-field-get key) val))
+    ((or 'nil 'node-prop 'node-property) (org-notion--node-prop (org-notion-field-get key) val))))
+
+(defun org-notion-property-drawer (alist)
+  "Given an ALIST of (KEY . VAL) pairs. create an org-element
+property-drawer."
+  (let ((res 'property-drawer)
+	(props))
+    (dolist (kv alist props)
+      (push
+       (org-notion-property-set (car kv) (cdr kv))
+       props))
+    (setq res (list res nil props))
+    res))
+
+(defun org-notion-parse-parent (json)
+  "Get the parent type and id. Return a cons cell (TYPE . ID)."
+  (let* ((parent (alist-get 'parent json))
+	 (type (alist-get 'type parent))
+	 (id (alist-get (intern type) parent)))
+    (cons type id)))
+
+(defun org-notion--get-results (json)
+  (when (equal (cdar json) "list")
+    (let ((results (alist-get 'results json)))
+      (dolist (i (append results nil)))
+      results)))
+
+(defun org-notion-filter-results (json-array obj-typ)
+  "Filter JSON-ARRAY (an array of results from the Notion API),
+ where :object = OBJ-TYP (a string)."
+  (seq-filter (lambda (a) (if (equal obj-typ (cdar a)) t nil)) json-array))
 
 (defsubst org-notion-string= (str1 str2)
   "Return t if strings STR1 and STR2 are equal, ignoring case."
@@ -276,7 +371,7 @@ integration.")
 			     :follow 'org-notion-browse
 			     :complete (lambda ()
 					 (format "notion:%s"))))
-    
+
 (defun org-notion-to-org-time (iso-time-str)
   "Convert ISO-TIME-STR to format \"%Y-%m-%d %T\".
 Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
@@ -312,13 +407,14 @@ headline at POM first, then buffer keywords."
 ;;;; Callbacks
 
 (defmacro org-notion-with-callback (&rest body)
-  "Evaluate BODY as a callback for `org-notion-dispatch'"
+  "Evaluate BODY as a callback for `org-notion-dispatch'. Errors are
+automatically handled and then `org-notion-last-dispatch-result'
+is set to capture the raw sexp value of json-data which can be
+further processed by BODY before being returned by
+`org-notion-dispatch'."
   (declare (debug t)
 	   (indent 0))
   `(lambda (response)
-     ;;  these are nullified in org-notion-dispatch
-     ;; (setq org-notion-last-dispatch-result nil)
-     ;; (setq org-notion-current-dispatch-buffer nil)
      (with-current-buffer (current-buffer)
        ;;  quick hack. url.el will always return body at this position.
        (search-forward "\n\n")
@@ -327,26 +423,14 @@ headline at POM first, then buffer keywords."
 	     (org-notion-log (format "HTTP %d: %s"
 				     (alist-get 'status json-data)
 				     (alist-get 'message json-data)))
-	   ,@body
 	   (setq org-notion-last-dispatch-result json-data)
-	   (setq org-notion-current-dispatch-buffer (current-buffer)))))))
-
+	   ,@body)))))
 
 (defun org-notion-callback-default ()
   "Read json string from `org-notion-dispatch' status buffer and return output"
   (org-notion-with-callback (org-notion-dbg json-data)))
 
-
-;;;; JSON helpers
-(defun org-notion-parse-parent (json)
-  "Get the parent type and id. Return a cons cell (TYPE . ID)."
-  (let* ((parent (alist-get 'parent json))
-	 (type (alist-get 'type parent))
-	 (id (alist-get (intern type) parent)))
-    (cons type id)))
-
 ;;;; Auth
-
 (defun org-notion-token (&optional token)
   "Find the Notion API Integration Token.
 If `org-notion-use-auth-source' is t check auth-source first. If
@@ -354,7 +438,7 @@ nil or TOKEN missing, prompt for token.  You can generate a new
 token at URL `https://www.notion.so/my-integrations'."
   (interactive)
   (if org-notion-use-auth-source
-      (let ((auth-source-creation-defaults '((user . "org-notion")
+              (let ((auth-source-creation-defaults '((user . "org-notion")
 					     (port . "443")))
 	    (found (nth 0 (auth-source-search
 			   :host org-notion-host
@@ -364,8 +448,8 @@ token at URL `https://www.notion.so/my-integrations'."
 	(when found
 	  (let ((sec (plist-get found :secret)))
 	    (if (functionp sec)
-		(funcall sec)
-	      sec))))
+		        (funcall sec)
+	          sec))))
     (or token
 	(read-passwd "Notion API Token: "))))
 
@@ -525,8 +609,7 @@ return `org-notion-last-dispatch-result'. When async is nil
 
 (cl-defmethod org-notion-dispatch ((obj org-notion-request))
   "Dispatch HTTP request with slots from `org-notion-request' OBJ instance."
-  (setq org-notion-current-dispatch-buffer nil
-	org-notion-last-dispatch-result nil)
+  (setq org-notion-last-dispatch-result nil)
   (with-slots (token version endpoint method data callback async) obj
     (let ((url-request-extra-headers `(("Authorization" . ,(concat "Bearer " (funcall token)))
 				       ("Notion-Version" . ,version)
@@ -627,7 +710,7 @@ return `org-notion-last-dispatch-result'. When async is nil
 	(_ (signal 'org-notion-invalid-method "test")))
       (unless async
 	(while (not org-notion-last-dispatch-result)
-	  (sleep-for 0.5))
+	  (sleep-for org-notion-dispatch-sync-sleep))
 	(when org-notion-last-dispatch-result
 	  org-notion-last-dispatch-result)))))
 
@@ -746,8 +829,8 @@ hash. The old one is always kept."
 
 ;;;; Object methods
 
-;; The following generics are implemented by `org-notion-object'
-;; subclasses.
+;; The following generic functions are implemented by
+;; `org-notion-object' subclasses.
 
 (cl-defgeneric org-notion-from-json (obj json)
   "Interpret JSON as `org-notion-object'")
@@ -835,10 +918,11 @@ a bot. Identified by the `:id' slot.")
   "Convert user to org-element TYPE."
   (with-slots (id usr-type name avatar email owner) obj
     (let* ((usr-str (format "%s %s" name (if email (format "<%s>" email))))
-	   (usr-kw `(:key "NOTION_USER" :value ,usr-str))
+	   (usr-kw   (org-notion--kw 'user usr-str) ;; `(:key "NOTION_USER" :value ,usr-str)
+	    )
 	   (id-kw `(:key "NOTION_ID" :value ,id))
 	   (em-kw `(:key "NOTION_EMAIL" :value ,email))
-	   (av-kw `(:key "NOTION_AVATAR_URL" :value ,avatar))
+	   (av-kw `(:key "NOTION_AVATAR" :value ,avatar))
 	   (props
 	    (unless (not '(id avatar email))
 	      `(property-drawer
@@ -851,7 +935,7 @@ a bot. Identified by the `:id' slot.")
 	  `(headline
 	    (:title ,name :level 1)
 	    ,props)))
-	('kw (org-element-interpret-data `(keyword ,usr-kw)))
+	('kw (org-element-interpret-data usr-kw))
 	('prop (org-element-interpret-data
 		`(node-property ,usr-kw)))
 	(_ (error "invalid org-element type %s" type))))))
@@ -869,7 +953,7 @@ a bot. Identified by the `:id' slot.")
 		  (p-usr (or (plist-get plst :NOTION_USER) (plist-get plst :title)))
 		  (p-id (plist-get plst :NOTION_ID))
 		  (p-email (plist-get plst :NOTION_EMAIL))
-		  (p-avatar (plist-get plst :NOTION_AVATAR_URL)))
+		  (p-avatar (plist-get plst :NOTION_AVATAR)))
 	     (setq user p-usr)
 	     (setq id p-id)
 	     (setq email p-email)
@@ -882,7 +966,7 @@ a bot. Identified by the `:id' slot.")
 	       ("NOTION_USER" (setq name val))
 	       ("NOTION_ID" (setq id val))
 	       ("NOTION_EMAIL" (setq email val))
-	       ("NOTION_AVATAR_URL" (setq avatar val)))))
+	       ("NOTION_AVATAR" (setq avatar val)))))
 	  ('section
 	   (let ((keywords (nthcdr 2 elt)))
 	     (dolist (kw keywords)
@@ -1040,8 +1124,8 @@ a bot. Identified by the `:id' slot.")
 	     (pcase key
 	       ("NOTION_ID" (setq id val))
 	       ("NOTION_URL" (setq url val))
-	       ("NOTION_ICON_URL" (setq icon val))
-	       ("NOTION_COVER_URL" (setq cover val)))))
+	       ("NOTION_ICON" (setq icon val))
+	       ("NOTION_COVER" (setq cover val)))))
 	  ('section
 	   (let ((keywords (nthcdr 2 elt)))
 	     (dolist (kw keywords)
@@ -1053,8 +1137,8 @@ a bot. Identified by the `:id' slot.")
 		     (pcase key
 		       ("NOTION_ID" (setq id val))
 		       ("NOTION_URL" (setq url val))
-		       ("NOTION_ICON_URL" (setq icon val))
-		       ("NOTION_COVER_URL" (setq cover val))))))))
+		       ("NOTION_ICON" (setq icon val))
+		       ("NOTION_COVER" (setq cover val))))))))
 	  (_ (error 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
 	obj))))
@@ -1088,6 +1172,7 @@ a bot. Identified by the `:id' slot.")
    (properties
     :initarg :properties
     :accessor org-notion-properties
+    :type (or list null)
     :documentation "Property values of this page.")
    (parent
     :initform nil
@@ -1110,38 +1195,51 @@ slot.")
 	(oset obj :id (alist-get 'id json))
 	(oset obj :created (alist-get 'created_time json))
 	(oset obj :updated (alist-get 'last_edited_time json))
-	(oset obj :archived (unless (alist-get 'archived json) t))
+	(oset obj :archived ( (alist-get 'archived json) t))
 	(oset obj :icon (alist-get 'icon json))
 	(oset obj :cover (alist-get 'cover json))
 	(oset obj :parent (org-notion-parse-parent json))
+	(oset obj :properties (alist-get 'properties json))
 	(oset obj :url (alist-get 'url json))
 	(cache-instance obj))
     (error "expected page object, found %s" (alist-get 'object json)))
   obj)
 
-(cl-defmethod org-notion-to-json ((obj org-notion-page)))
-
 (cl-defmethod org-notion-from-org ((obj org-notion-page) str))
 
 (cl-defmethod org-notion-to-org ((obj org-notion-page) &optional type)
-  (with-slots (id created updated properties parent) obj
+  (with-slots (id created updated properties parent archived icon cover url) obj
     (pcase type
       ((or 'nil 'headline)
-       (org-element-interpret-data
-	`(headline
-	  (:title "" :level 1		; FIXME
-		  :CREATED (org-notion-to-org-time created)
-		  :UPDATED (org-notion-to-org-time updated))
-	  (property-drawer
-	   nil ((node-property (:key "NOTION_ID" :value ,id))
-		(node-property (:key "CREATED" :value ,created))
-		(node-property (:key "UPDATED" :value ,updated)))))))
+       (let ((title
+	      (alist-get 'content
+			 (alist-get 'text (aref (alist-get 'title (alist-get 'Name properties)) 0)))))
+	 (org-element-interpret-data
+	  `(headline
+	    (:title ,title :level 1	; FIXME
+		    :CREATED (org-notion-to-org-time created)
+		    :UPDATED (org-notion-to-org-time updated))
+	    (property-drawer
+	     nil ((node-property (:key "NOTION_ID" :value ,id))
+		  (node-property (:key "NOTION_URL" :value ,url))
+		  (node-property (:key "NOTION_ICON" :value ,icon))
+		  (node-property (:key "NOTION_COVER" :value ,cover))
+		  (node-property (:key "NOTION_PARENT" :value ,parent))
+		  (node-property (:key "CREATED" :value ,created))
+		  (node-property (:key "UPDATED" :value ,updated))		
+		  (when archived
+		    (node-property (:key "NOTION_ARCHIVED" :value t)))))))))
       ('file
        (org-element-interpret-data
 	`(org-data nil (section nil)
 		   (keyword (:key "NOTION_ID" :value ,id))
+		   (keyword (:key "NOTION_URL" :value ,url))
+		   (keyword (:key "NOTION_ICON" :value ,icon))
+		   (keyword (:key "NOTION_COVER" :value ,cover))
+		   (keyword (:key "NOTION_PARENT" :value ,parent))
 		   (keyword (:key "CREATED" :value ,created))
-		   (keyword (:key "UPDATED" :value ,updated)))))
+		   (keyword (:key "UPDATED" :value ,updated))
+		   (when archived (keyword (:key "NOTION_ARCHIVED" :value ,archived))))))
       (_ (error "invalid org-element type %s" type)))))
 
 ;;;;; Block
@@ -1373,8 +1471,7 @@ be \"page\" or \"database\"."
 		  (when (equal (cdar json-data) "list")
 		    (let ((results (alist-get 'results json-data)))
 		      (org-notion-log results)
-		      (setq org-notion-last-search-result results))))))
-    org-notion-last-search-result))
+		      (setq org-notion-last-dispatch-result results))))))))
 
 ;;; Org-mode Commands
 

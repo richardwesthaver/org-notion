@@ -100,5 +100,6 @@
 	  (pom (point-min)))
       (should (equal (org-notion-id-at-point pom) id)))))
 
+
 (provide 'org-notion-test)
 ;;; org-notion-test.el ends here
