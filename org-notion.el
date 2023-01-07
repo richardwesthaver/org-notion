@@ -297,31 +297,32 @@ with SYM in `org-notion-class-keys'."
   (alist-get sym org-notion-class-keys))
 
 (defun org-notion--kv (key val)
-  `(:key ,key :value ,val))
+  (list :key key :value val))
 
 (defun org-notion--node-prop (key val)
   "Create an org-element node-property given KEY and VAL"
-  (cons 'node-property (org-notion--kv key val)))
+  `(node-property ,(org-notion--kv key val)))
 
 (defun org-notion--kw (key val)
   "Create an org-element keyword given KEY and VAL."
-  (cons 'keyword (org-notion--kv key val)))
+  `(keyword ,(org-notion--kv key val)))
 
 (defun org-notion--prop (key val &optional type)
   "Create an org-element TYPE given KEY and VAL.
 KEY is looked up in `org-notion-field-org-keys' and "
+  (let ((key (if (stringp key) key (org-notion-field-get key))))
   (pcase type
-    ((or 'kw 'keyword) (org-notion--kw (org-notion-field-get key) val))
-    ((or 'nil 'node-prop 'node-property) (org-notion--node-prop (org-notion-field-get key) val))))
+    ((or 'kw 'keyword) (org-notion--kw key val))
+    ((or 'nil 'prop 'node-prop 'node-property) (org-notion--node-prop key val)))))
 
-(defun org-notion-property-drawer (alist)
+(defun org-notion--property-drawer (alist)
   "Given an ALIST of (KEY . VAL) pairs. create an org-element
 property-drawer."
   (let ((res 'property-drawer)
 	(props))
     (dolist (kv alist props)
       (push
-       (org-notion-property-set (car kv) (cdr kv))
+       (org-notion--prop (car kv) (cdr kv) 'prop)
        props))
     (setq res (list res nil props))
     res))
@@ -920,7 +921,7 @@ a bot. Identified by the `:id' slot.")
 	   (usr-kw   (org-notion--kw 'user usr-str))
 	   (props
 	    (unless (not '(id avatar email))
-	      (org-notion-property-drawer
+	      (org-notion--property-drawer
 	       `((id . ,id)
 		 (email . ,email)
 		 (avatar . ,avatar))))))
@@ -1063,15 +1064,16 @@ a bot. Identified by the `:id' slot.")
 (cl-defmethod org-notion-to-org ((obj org-notion-database) &optional type)
   "Convert database to org-element TYPE."
   (with-slots (id title created updated icon cover properties parent url) obj
+    ;; TODO 2023-01-07: we can do better here
     (let ((props
-	    (unless (not '(id cover icon))
-	      (org-notion-property-drawer
-	       `((id . ,id)
-		 (icon . ,icon)
-		 (cover . ,cover)
-		 (created . ,created)
-		 (updated . ,updated)
-		 (url . ,url))))))
+	   (when (or id icon cover created updated url)
+	     (org-notion--property-drawer
+	      `((id . ,id)
+		(icon . ,icon)
+		(cover . ,cover)
+		(created . ,created)
+		(updated . ,updated)
+		(url . ,url))))))
       (pcase type
 	((or 'nil 'heading)
 	 (org-element-interpret-data
@@ -1080,7 +1082,8 @@ a bot. Identified by the `:id' slot.")
 	    ,props)))
 	('kw (org-element-interpret-data (org-notion--prop 'id id 'kw)))
 	('prop (org-element-interpret-data
-		(org-notion--prop 'id id)))
+		(org-notion--prop 'id id 'prop)))
+	;; TODO
 	('table nil)
 	(_ (error 'org-notion-invalid-element-type type))))))
 
@@ -1283,30 +1286,39 @@ slot.")
 (cl-defmethod org-notion-from-json ((obj org-notion-block) json)
   (if (string= "block" (alist-get 'object json))
       (progn
+	;; capture early block data from json
 	(oset obj :id (alist-get 'id json))
 	(oset obj :type (intern (alist-get 'type json)))
 	(oset obj :created (alist-get 'created_time json))
 	(oset obj :updated (alist-get 'last_edited_time json))
 	(oset obj :archived (unless (alist-get 'archived json) t))
 	(oset obj :has_children (unless (alist-get 'has_children json) t))
+	;; use value of :type slot to capture text, children, and
+	;; properties.
 	(pcase (org-notion-type obj)
 	  ('paragraph
 	   (let* ((content (alist-get 'paragraph json))
-		  (res (org-notion-rich-text
-			:color (intern (alist-get 'color content)))))
-	     (oset obj :text (vector res))
-	     ))
-	  ('heading_2 ()) 		; text
-	  ('heading_3 ()) 		; text
-	  ('bulleted_list_item ()) 	; text + children
-	  ('numbered_list_item ()) 	; text + children
-	  ('to_do ()) 			; text + children + properties
-	  ('toggle ()) 			; text + children
-	  ('child_page 			; properties
-	   (oset obj :properties (car (alist-get 'child_page json)))) 
-	  ('child_database 		; properties
+		  ;; TODO 2023-01-01: this only accounts for a single
+		  ;; text object in the array.
+		  (val (elt (alist-get 'text content) 0))
+		  (txt (org-notion-rich-text
+			:type (intern (alist-get 'type val))
+			:color (intern (alist-get 'color content))
+			:annotations (alist-get 'annotations val)
+			:plain_text (alist-get 'plain_text val)
+			:href (alist-get 'href val))))
+	     (oset obj :text (vector txt))))
+	  ('heading_2 ())		; text
+	  ('heading_3 ())		; text
+	  ('bulleted_list_item ())	; text + children
+	  ('numbered_list_item ())	; text + children
+	  ('to_do ())			; text + children + properties
+	  ('toggle ())			; text + children
+	  ('child_page			; properties
+	   (oset obj :properties (car (alist-get 'child_page json))))
+	  ('child_database		; properties
 	   (oset obj :properties (car (alist-get 'child_database json))))
-	  ('embed 			; properties
+	  ('embed			; properties
 	   (oset obj :properties (car (alist-get 'embed json))))
 	  ('image ()) ; file https://developers.notion.com/reference/file-object
 	  ('video ()) ; file
@@ -1318,16 +1330,16 @@ slot.")
 	  ('code ())	   ; text + properties
 	  ('equation ())   ; properties
 	  ('divider ())	   ; nil
-	  ('table_of_contents ()) 	; nil
-	  ('breadcrumb ()) 		; nil
-	  ('column ()) 			; children
-	  ('column_list ()) 		; children
-	  ('link_preview ()) 		; properties
-	  ('synced_block ()) 		; properties + children
-	  ('template ()) 		; text + children
-	  ('link_to_page ()) 		; properties
-	  ('table ()) 			; properties
-	  ('table_row ()) 		; children
+	  ('table_of_contents ())	; nil
+	  ('breadcrumb ())		; nil
+	  ('column ())			; children
+	  ('column_list ())		; children
+	  ('link_preview ())		; properties
+	  ('synced_block ())		; properties + children
+	  ('template ())		; text + children
+	  ('link_to_page ())		; properties
+	  ('table ())			; properties
+	  ('table_row ())		; children
 	  ('unsupported ())
 	  (_ ())))
     (error "expected block object, found %s" (alist-get 'object json)))
@@ -1344,10 +1356,10 @@ slot.")
 ;; the Notion API and as Org syntax.
 (defclass org-notion-rich-text (org-notion-class)
   ((type
-    :initform "text"
+    :initform 'text
     :initarg :type
     :accessor org-notion-type
-    :type string
+    :type symbol
     :documentation "Type of this rich text object. Possible
     values are: 'text', 'mention', 'equation'")
    (plain_text
@@ -1364,7 +1376,7 @@ slot.")
    (annotations
     :initform nil
     :initarg :annotations
-    :type (or null string)
+    :type (or null list symbol)
     :documentation "All annotations that apply to this rich
     text. See `org-notion-annotation-types' for a list of
     possible values.")

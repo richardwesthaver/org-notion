@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2022-12-27
+#+DATE: 2023-01-07
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
@@ -144,3 +144,7 @@ defauls are show below.
     - [ ] org-notion-inline-equation  
     - [ ] org-notion-inline-mention   
     - [ ] org-notion-inline-text      
+*** TODO add org-notion-cache-config custom var
+- State "TODO"       from              [2023-01-07 Sat 01:45]
+- need to run tests with cache disabled
+- will require unit testing different cache configurations
