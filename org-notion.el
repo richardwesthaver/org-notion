@@ -244,10 +244,15 @@ org-notion-class type names, i.e. org-notion-database.")
 ;;; Errors
 
 (define-error 'org-notion-error "Unknown org-notion error")
-
+(define-error 'org-notion-invalid-key "Invalid key value")
 (define-error 'org-notion-invalid-uuid "Invalid UUID" 'org-notion-error)
 (define-error 'org-notion-invalid-method "Invalid API method" 'org-notion-error)
 (define-error 'org-notion-invalid-element-type "Invalid Org element type" 'org-notion-error)
+(define-error 'org-notion-bad-time "Bad time spec" 'org-notion-error)
+(define-error 'org-notion-invalid-page-size
+	      (format "PAGE_SIZE must be an integer less than or equal to %s"
+		      org-notion-max-page-size)
+	      'org-notion-error)
 
 ;; API Responses
 (define-error 'org-notion-bad-request "HTTP 400 Bad Request" 'org-notion-error)
@@ -310,7 +315,10 @@ with SYM in `org-notion-class-keys'."
 (defun org-notion--prop (key val &optional type)
   "Create an org-element TYPE given KEY and VAL.
 KEY is looked up in `org-notion-field-org-keys' and "
-  (let ((key (if (stringp key) key (org-notion-field-get key))))
+  (let ((key (pcase key
+	       ((pred symbolp) (org-notion-field-get key))
+	       ((pred stringp) key)
+	       ('nil (signal 'org-notion-invalid-key key)))))
   (pcase type
     ((or 'kw 'keyword) (org-notion--kw key val))
     ((or 'nil 'prop 'node-prop 'node-property) (org-notion--node-prop key val)))))
@@ -382,7 +390,7 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
        (apply
         'encode-time
         (iso8601-parse iso-time-str)))
-    (error iso-time-str)))
+    (signal 'org-notion-bad-time iso-time-str)))
 
 ;; TODO 2022-01-07: account for timezone
 (defun org-notion-from-org-time (org-time-str)
@@ -393,7 +401,7 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
        (apply 'encode-time
 	      (parse-time-string org-time-str))
        t)
-    (error org-time-str)))
+    (signal 'org-notion-bad-time org-time-str)))
 
 (defun org-notion-id-at-point (&optional pom)
   "Get the value of `org-notion-id-property' property key. Checks
@@ -506,9 +514,7 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
       (if (and (integerp page_size)
 	       (>= org-notion-max-page-size page_size))
 	  (nconc data `((page_size . ,page_size)))
-	(error
-	 (format "PAGE_SIZE must be an integer less than or equal to %s"
-		 org-notion-max-page-size))))
+	(signal 'org-notion-invalid-page-size page_size)))
     data))
 
 (defun org-notion-database-create-data (parent properties &optional title)
@@ -547,9 +553,8 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
       (if (and (integerp page_size)
 	       (>= org-notion-max-page-size page_size))
 	  (nconc data `((page_size . ,page_size)))
-	(error
-	 (format "PAGE_SIZE must be an integer less than or equal to %s"
-		 org-notion-max-page-size))))
+	(signal 'org-notion-invalid-page-size page_size
+	 )))
     data))
 
 (defun org-notion-page-data (parent properties &optional children icon cover)
@@ -934,7 +939,7 @@ a bot. Identified by the `:id' slot.")
 	('kw (org-element-interpret-data usr-kw))
 	('prop (org-element-interpret-data
 		`(node-property ,usr-kw)))
-	(_ (error "invalid org-element type %s" type))))))
+	(_ (signal 'org-notion-invalid-element-type type))))))
 
 (cl-defmethod org-notion-from-org ((obj org-notion-user) &optional str)
   "Parse STR org element into an `org-notion-user' OBJ."
@@ -976,7 +981,7 @@ a bot. Identified by the `:id' slot.")
 		       ("NOTION_ID" (setq id val))
 		       ("NOTION_EMAIL" (setq email val))
 		       ("NOTION_AVATAR_URL" (setq avatar val))))))))
-	  (_ (error "invalid org-element type %s" type)))
+	  (_ (signal 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
 	obj))))
 
@@ -1233,7 +1238,7 @@ slot.")
 		   (keyword (:key "CREATED" :value ,created))
 		   (keyword (:key "UPDATED" :value ,updated))
 		   (when archived (keyword (:key "NOTION_ARCHIVED" :value ,archived))))))
-      (_ (error "invalid org-element type %s" type)))))
+      (_ (signal 'org-notion-invalid-element-type type)))))
 
 ;;;;; Block
 
