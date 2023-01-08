@@ -29,6 +29,9 @@
 (defvar org-notion-load-utils nil)
 (when org-notion-load-utils (require 'org-notion-utils "org-notion-utils"))
 
+;; prefer to conditionally enable caching when needed
+(setq-local org-notion-cache-enable nil)
+
 (defun org-notion--get-results (json)
   (when (equal (cdar json) "list")
     (let ((results (alist-get 'results json)))
@@ -122,7 +125,11 @@
 (ert-deftest inline-equation-from-org-ok ())
 (ert-deftest inline-equation-to-org-ok ())
 
-(ert-deftest search-ok () (should (org-notion-search "org-notion")))
+(ert-deftest search-ok ()
+  (let ((q "org-notion"))
+    (should (org-notion-search q "ascending" nil))
+    (should (org-notion-search q "descending" "page"))
+    (should (org-notion-search "" nil "database"))))
 
 ;; org-mode tests
 (ert-deftest to-org-time-ok ()

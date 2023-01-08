@@ -1,4 +1,7 @@
+;;; org-notion-test.el --- utils for org-notion -*- lexical-binding: t; -*-
+
 (defun insert-random-uuid ()
+  "very inefficient, but easy to understand."
   (interactive)
   (insert
    (format

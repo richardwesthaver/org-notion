@@ -99,6 +99,13 @@ block type.")
   "Mention types available for Notion API text objects, used by
   `org-notion-rich-text' class.")
 
+(defconst org-notion-property-types '(rich_text number select multi_select
+						date formula relation rollup
+						title people files checkbox
+						url email phone_number created_time
+						created_by last_edited_time last_edited_by)
+  "Notion default property_item names.")
+
 ;;; Custom
 
 (defgroup org-notion nil
@@ -115,6 +122,14 @@ interactive prompt if token isn't found."
 (defcustom org-notion-coding-system 'utf-8
   "Use custom coding system for org-notion."
   :type 'symbol
+  :group 'org-notion)
+
+(defcustom org-notion-cache-enable t
+  "Enable org-notion object cache if value is non-nil. Note that the
+default caching behavior is to write a message and retur nil when
+attempting to insert a duplicate object, which occurs often in
+testing and cause `should' to return unexpected results."
+  :type 'boolean
   :group 'org-notion)
 
 (defcustom org-notion-completion-ignore-case t
@@ -169,15 +184,6 @@ completion is offered.
 
 (defvar org-notion-hashtable (make-hash-table :test #'equal)
   "Hashtable for `org-notion-class' instances.")
-
-(defvar org-notion-page-cache (make-hash-table :test #'equal)
-  "Cache of Notion pages.")
-
-(defvar org-notion-database-cache (make-hash-table :test #'equal)
-  "Cache of Notion databases.")
-
-(defvar org-notion-block-cache (make-hash-table :test #'equal)
-  "Cache of Notion blocks.")
 
 (defvar org-notion-verbosity 'debug
   "Level of verbosity for `org-notion' logging.")
@@ -279,8 +285,7 @@ org-notion-class type names, i.e. org-notion-database.")
 
 (defun org-notion--handle-http-error (json)
   "Check Notion response in JSON for an error and handle it by
-signaling `org-notion-error' types. If no error is found, return
-nil."
+signaling `org-notion-error' types."
   (when (equal (cdar json) "error")
     (let ((err (org-notion--http-error (alist-get 'status json)))
 	  (msg (alist-get 'message json)))
@@ -395,7 +400,7 @@ property-drawer."
     (cons type id)))
 
 (defun org-notion--get-results (json)
-  (when (equal (cdar json) "list")
+  (when (equal (alist-get 'object json) "list")
     (alist-get 'results json)))
 
 (defun org-notion-filter-results (json-array obj-typ)
@@ -527,10 +532,10 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
   (let ((slots (mapcar (lambda (slot) (aref slot 1)) (eieio-class-slots (eieio-object-class obj)))))
     (setq slots (cl-remove-if (lambda (s) (not (slot-boundp obj s))) slots))
     (apply #'concat
-	   (mapcar (lambda (slot)
-		     (let ((slot (intern (pp-to-string slot))))
-		       (format "%+4s:   %s\n" slot (slot-value obj (intern (pp-to-string slot))))))
-		   slots))))
+	   (cons (format "\n|%s|\n" (eieio-object-class-name obj)) (mapcar (lambda (slot)
+		      (let ((slot (intern (pp-to-string slot))))
+			(format "%+4s:   %s\n" slot (slot-value obj (intern (pp-to-string slot))))))
+		    slots)))))
 
 ;;;; Requests
 
@@ -718,8 +723,9 @@ return `org-notion-last-dispatch-result'. When async is nil
 	       (url (concat endpoint (format "pages/%s" (org-notion-valid-uuid data)))))
 	   (url-retrieve url callback nil nil nil)))
 	('page-property
+	 ;; (ID . PROP-ID)
 	 (let ((url-request-method "GET")
-	       (url (concat endpoint (format "pages/%s/properties/%s" data data))))
+	       (url (concat endpoint (format "pages/%s/properties/%s" (car data) (cdr data)))))
 	   (url-retrieve url callback nil nil nil)))
 	;; parent: {type:(page_id/database_id) X_id:id}
 	;; properties: {}
@@ -761,7 +767,7 @@ return `org-notion-last-dispatch-result'. When async is nil
 	 (let ((url-request-method "DELETE")
 	       (url (concat endpoint "blocks/%s" data)))
 	   (url-retrieve url callback nil nil nil)))
-	(_ (signal 'org-notion-invalid-method "test")))
+	(err (signal 'org-notion-invalid-method err)))
       (unless async
 	(while (not org-notion-last-dispatch-result)
 	  (sleep-for org-notion-dispatch-sync-sleep))
@@ -864,12 +870,16 @@ are lists of values."
 (cl-defmethod cache-instance ((this org-notion-cache) &rest _slots)
   "Make sure OBJ is in our cache. Optional argument SLOTS are the
 initialization arguments. This will not update a duplicate
-hash. The old one is always kept."
-  (let ((table (symbol-value (oref this cache)))
-	(key (org-notion-id this)))
-    (if (not (gethash key table))
-	(puthash key this table)
-      (org-notion-log (format "duplicate key: %s" key)))))
+hash. The old one is always kept.
+
+Note that this function is a no-op if `org-notion-cache-enable'
+is non-nil."
+  (when org-notion-cache-enable
+    (let ((table (symbol-value (oref this cache)))
+	  (key (org-notion-id this)))
+      (if (not (gethash key table))
+	  (puthash key this table)
+	(org-notion-log (format "duplicate key: %s" key))))))
 
 (cl-defmethod delete-instance ((this org-notion-cache))
   "Remove THIS from cache."
@@ -1164,12 +1174,12 @@ a bot. Identified by the `:id' slot.")
 		  (p-created (plist-get plst :CREATED))
 		  (p-updated (plist-get plst :UPDATED))
 		  (p-url (plist-get plst :NOTION_URL)))
-	     (setq id p-id)
-	     (setq  icon p-icon)
-	     (setq cover p-cover)
-	     (setq created p-created)
-	     (setq updated p-updated)
-	     (setq url p-url)))
+	     (setq id p-id
+		   icon p-icon
+		   cover p-cover
+		   created p-created
+		   updated p-updated
+		   url p-url)))
 	  ('keyword
 	   (let* ((plst (cadr elt))
 		  (key (plist-get plst :key))
@@ -1288,8 +1298,23 @@ slot.")
 		   (when archived (keyword (:key "NOTION_ARCHIVED" :value ,archived))))))
       (_ (signal 'org-notion-invalid-element-type type)))))
 
-;;;;; Block
+;;;;; Property Item
+(defclass org-notion-property-item (org-notion-object)
+  ((type
+    :initform nil
+    :initarg :type
+    :accessor org-notion-type
+    :type (or symbol null)
+    :documentation "Type of the properties. See variable `org-notion-property-types' for possible values."))
+  :documentation "Notion property_item object - identified by the `:id' slot.")
 
+(cl-defmethod org-notion-from-json ((obj org-notion-property-item)))
+(cl-defmethod org-notion-to-json ((obj org-notion-property-item)))
+(cl-defmethod org-notion-from-org ((obj org-notion-property-item) str))
+(cl-defmethod org-notion-to-org ((obj org-notion-property-item) &optional type))
+
+
+;;;;; Block
 (defclass org-notion-block (org-notion-object)
   ((type
     :initform 'unsupported
@@ -1516,6 +1541,98 @@ enabled."
 			)))))))
 
 ;;;###autoload
+(defun org-notion-get-user (id)
+  "Get user with given ID from workspace."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'user
+    :data id
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "user")
+		  (org-notion-from-json (org-notion-user) json-data))))))
+
+;;;###autoload
+(defun org-notion-get-database (id)
+  "Get database with given ID from workspace."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'database
+    :data id
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "database")
+		  (org-notion-from-json (org-notion-database) json-data))))))
+
+;; TODO 2023-01-08
+;;;###autoload
+(defun org-notion-query-database (id query)
+  "Query database with ID using QUERY."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'database
+    :data (id . query)
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "list")
+		  json-data)))))
+
+;; (defun org-notion-create-database () )
+;; (defun org-notion-update-database () )
+
+;;;###autoload
+(defun org-notion-get-page (id)
+  "Get page with given ID from workspace."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'page
+    :data id
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "page")
+		  (org-notion-from-json (org-notion-page) json-data))))))
+
+(defun org-notion-get-page-property (id prop-id)
+  "Get PROP-ID property for page with given ID from workspace."
+  (interactive)
+  (org-notion--get-results
+   (org-notion-dispatch
+    (org-notion-request
+     :method 'page-property
+     :data (cons id prop-id)))))
+
+;; (defun org-notion-create-page () )
+;; (defun org-notion-update-page () )
+
+;;;###autoload
+(defun org-notion-get-block (id)
+  "Get block with given ID from workspace."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'block
+    :data id
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "block")
+		  (org-notion-from-json (org-notion-block) json-data))))))
+
+;; TODO 2023-01-08
+;;;###autoload
+(defun org-notion-get-block-children (id)
+  "Get children from block with given ID from workspace."
+  (interactive)
+  (org-notion-dispatch
+   (org-notion-request
+    :method 'block-children
+    :data id
+    :callback (org-notion-with-callback
+		(when (equal (cdar json-data) "list")
+		  json-data)))))
+
+;; (defun org-notion-append-block () )
+;; (defun org-notion-delete-block () )
+
+;;;###autoload
 (defun org-notion-search (query &optional sort filter)
   "Search the Notion workspace using QUERY and optional SORT and FILTER values.
 SORT should be \"ascending\" or \"descending\" and FILTER should
@@ -1533,27 +1650,49 @@ be \"page\" or \"database\"."
 		      (org-notion-log results)
 		      (setq org-notion-last-dispatch-result results))))))))
 
-;;; Org-mode Commands
+;;; Org
+;;;; Parsers
+(defun org-notion-parse-buffer (&optional visible-only)
+  "Recursively parse the buffer and return an
+ `org-notion-object'.
 
+When VISIBLE-ONLY is non-nil, don’t parse contents of hidden
+elements.
+"
+  (interactive)
+  (with-current-buffer (current-buffer)
+    (let ((tree (org-notion-parse-buffer 'object visible-only)))
+      (org-notion-dbg tree))))
+
+(defun org-notion-parse-element (str &optional type)
+  "Parse STR as `org-notion-object' TYPE."
+  )
+
+;;;; Commands
 ;;;###autoload
 (defun org-notion-browse (&optional uuid)
   "Open a Notion page by UUID."
   (interactive "sID: ")
   (if-let ((id (or uuid (org-notion-id-at-point))))
-              (browse-url (format "https://www.notion.so/%s" id))
-        (message "failed to find %s" org-notion-id-property)))
+      (browse-url (format "https://www.notion.so/%s" id))
+    (message "failed to find %s" org-notion-id-property)))
 
 ;;;###autoload
-;; (defun org-notion-push (&optional buf create)
-;;   "Push the current headline to Notion. If BUF is non-nil push the
-;; entire buffer. If CREATE is non-nil also create new objects."
-;;   (interactive))
+(defun org-notion-push (&optional subtree)
+  "Push current buffer to Notion.so. If SUBTREE is non-nil, limit to
+the current heading."
+  (interactive)
+  (with-current-buffer (current-buffer)
+    (let ((tree (if subtree
+		    (progn (org-back-to-heading t)
+			   (org-notion-parse-element 'heading))
+		  (org-notion-parse-buffer)))))))
 
 ;;;###autoload
-;; (defun org-notion-pull (&optional buf)
-;;   "Pull and update the current headline from Notion. If BUF is
-;; non-nil pull updates for entire buffer."
-;;   (interactive))
+(defun org-notion-pull (&optional buf)
+  "Pull and update the current headline from Notion. If BUF is
+non-nil pull updates for entire buffer."
+  (interactive))
 
 ;;; Minor-mode
 
