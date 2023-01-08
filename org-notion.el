@@ -164,9 +164,6 @@ completion is offered.
 (defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
     "URI of Notion API endpoint")
 
-(defvar org-notion-id-property "NOTION_ID"
-  "Name of NOTION_ID Org-mode property.")
-
 (defvar org-notion-uuid-regexp "\\<[[:xdigit:]]\\{8\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{4\\}-?[[:xdigit:]]\\{12\\}\\>"
   "A regular expression matching a UUID with or without hyphens.")
 
@@ -222,8 +219,11 @@ calls to `org-notion-dispatch' (:async nil).")
   "Mapping of org-notion EIEIO field names to org-element
 node-property or keyword names (:key).")
 
-(defvar org-notion-field-names (mapcar #'car org-notion-field-org-keys)
+(defvar org-notion-field-abbrevs (mapcar #'car org-notion-field-org-keys)
   "L1 field short names.")
+
+(defvar org-notion-field-names (mapcar #'cdr org-notion-field-org-keys)
+  "L1 field full names as string.")
 
 (defvar org-notion-class-keys
   '((database . org-notion-database)
@@ -262,10 +262,34 @@ org-notion-class type names, i.e. org-notion-database.")
 (define-error 'org-notion-conflict "HTTP 409 Conflict error possibly due to data collision" 'org-notion-error)
 (define-error 'org-notion-rate-limited "HTTP 429 Exceeded number of requests allowed" 'org-notion-error)
 (define-error 'org-notion-unexpected "HTTP 500 Internal server error occurred" 'org-notion-error)
-(define-error 'org-notion-unavailable "HTTP 503 Notion is unavailable" 'org-notion-error)
-(define-error 'org-notion-database-unavailable "HTTP 503 Notion database service is unavailable" 'org-notion-error)
+(define-error 'org-notion-unavailable "HTTP 503 Resource is unavailable" 'org-notion-error)
+
+(defun org-notion--http-error (status)
+  "Return an `org-notion-error' type based on STATUS."
+  (pcase status
+    (400 'org-notion-bad-request)
+    (401 'org-notion-unauthorized)
+    (403 'org-notion-restricted-resource)
+    (404 'org-notion-not-found)
+    (409 'org-notion-conflict)
+    (429 'org-notion-rate-limited)
+    (500 'org-notion-unexpected)
+    (503 'org-notion-unavailable)
+    (_ 'org-notion-error)))
+
+(defun org-notion--handle-http-error (json)
+  "Check Notion response in JSON for an error and handle it by
+signaling `org-notion-error' types. If no error is found, return
+nil."
+  (when (equal (cdar json) "error")
+    (let ((err (org-notion--http-error (alist-get 'status json)))
+	  (msg (alist-get 'message json)))
+      (signal err msg))))
 
 ;;; Utils
+
+;;;###autoload
+(def-edebug-elem-spec 'org-notion-place '(form))
 
 (defun org-notion-log (&rest s)
   "Log a message."
@@ -284,6 +308,16 @@ org-notion-class type names, i.e. org-notion-database.")
     ((class-p ,obj) (eieio-oref-default ,obj ',slot))
     ((eieio-object-p ,obj) (eieio-oref ,obj ',slot))))
 
+(defmacro oref-and (obj &rest args)
+  "Get the value of SLOTs in OBJ. Uses `oref-or' internally."
+  (declare (debug (&rest [org-notion-place form])))
+  (if (and args (null (cdr args)))
+      (let ((slot (pop args)))
+	`(oref-or ,obj ,slot ,val))
+      (let ((sets nil))
+	(while args (push `(oref-or ,obj ,(pop args)) sets))
+	(cons 'progn (nreverse sets)))))
+
 (defmacro oset-or (obj slot value)
   "Set the value of object or class."
   (declare (debug (form symbolp form)))
@@ -291,10 +325,28 @@ org-notion-class type names, i.e. org-notion-database.")
     ((class-p ,obj) (eieio-oset-default ,obj ',slot ,value))
     ((eieio-object-p ,obj) (eieio-oset ,obj ',slot ,value))))
 
-(defun org-notion-field-get (sym)
-  "Return the org-element property key name (a string) associated
-with SYM in `org-notion-field-org-keys'."
-  (alist-get sym org-notion-field-org-keys))
+(defmacro oset-and (obj &rest args)
+  "Set each SLOT to VALUE in OBJ. Uses `oset-or' internally."
+  (declare (debug (&rest [org-notion-place form])))
+  (if (/= (logand (length args) 1) 0)
+      (signal 'wrong-number-of-arguments (list 'oset-and (length args)))
+    (if (and args (null (cddr args)))
+	(let ((slot (pop args))
+	      (val (pop args)))
+	  `(oset-or ,obj ,slot ,val))
+      (let ((sets nil))
+	(while args (push `(oset-or ,obj ,(pop args) ,(pop args)) sets))
+	(cons 'progn (nreverse sets))))))
+
+(defun org-notion-field-assoc (sym)
+  "Return the member of `org-notion-field-names' associated with SYM
+in `org-notion-field-org-keys'."
+  (assoc sym org-notion-field-org-keys))
+
+(defun org-notion-field-rassoc (str)
+  "Return the member of `org-notion-field-abbrevs' associated with
+STR in `org-notion-field-org-keys'."
+  (rassoc str org-notion-field-org-keys))
 
 (defun org-notion-class-get (sym)
   "Return the org-element property key name (a string) associated
@@ -404,13 +456,13 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
     (signal 'org-notion-bad-time org-time-str)))
 
 (defun org-notion-id-at-point (&optional pom)
-  "Get the value of `org-notion-id-property' property key. Checks
+  "Get the org-notion-id at point. Checks
 headline at POM first, then buffer keywords."
+  (let ((id (org-notion-field-get 'id)))
   (org-with-point-at pom
-    (or (cdr (assoc org-notion-id-property
-		    (org-entry-properties)))
-	(cadr (assoc org-notion-id-property
-		     (org-collect-keywords `(,org-notion-id-property)))))))
+    (or (thing-at-point 'uuid t)
+     (cdr (assoc id (org-entry-properties)))
+     (cadr (assoc id (org-collect-keywords (list id))))))))
 
 ;;;; Callbacks
 
@@ -427,12 +479,9 @@ further processed by BODY before being returned by
        ;;  quick hack. url.el will always return body at this position.
        (search-forward "\n\n")
        (let ((json-data (json-read)))
-	 (if (equal (cdar json-data) "error")
-	     (org-notion-log (format "HTTP %d: %s"
-				     (alist-get 'status json-data)
-				     (alist-get 'message json-data)))
-	   (setq org-notion-last-dispatch-result json-data)
-	   ,@body)))))
+	 (setq org-notion-last-dispatch-result json-data)
+	 (org-notion--handle-http-error json-data)
+	 ,@body))))
 
 (defun org-notion-callback-default ()
   "Read json string from `org-notion-dispatch' status buffer and return output"
@@ -903,12 +952,14 @@ a bot. Identified by the `:id' slot.")
 (cl-defmethod org-notion-from-json ((obj org-notion-user) json)
   (if (string= "user" (alist-get 'object json))
       (progn
-	(oset obj :id (alist-get 'id json))
-	(oset obj :type (alist-get 'type json))
-	(oset obj :name (alist-get 'name json))
-	(oset obj :avatar (alist-get 'avatar_url json))
-	(oset obj :email (alist-get 'email json))
-	(oset obj :owner (cdadar (alist-get 'bot json)))
+	(oset-and
+	 obj
+	 :id (alist-get 'id json)
+	 :type (alist-get 'type json)        
+	 :name (alist-get 'name json)        
+	 :avatar (alist-get 'avatar_url json)
+	 :email (alist-get 'email json)      
+	 :owner (cdadar (alist-get 'bot json)))
 	(cache-instance obj))
     (error "expected user object, found %s" (alist-get 'object json)))
   obj)
@@ -923,7 +974,6 @@ a bot. Identified by the `:id' slot.")
   "Convert user to org-element TYPE."
   (with-slots (id usr-type name avatar email owner) obj
     (let* ((usr-str (format "%s %s" name (if email (format "<%s>" email))))
-	   (usr-kw   (org-notion--kw 'user usr-str))
 	   (props
 	    (unless (not '(id avatar email))
 	      (org-notion--property-drawer
@@ -936,9 +986,9 @@ a bot. Identified by the `:id' slot.")
 	  `(headline
 	    (:title ,name :level 1)
 	    ,props)))
-	('kw (org-element-interpret-data usr-kw))
+	('kw (org-element-interpret-data (org-notion--prop 'user usr-str 'kw)))
 	('prop (org-element-interpret-data
-		`(node-property ,usr-kw)))
+		(org-notion--prop 'user usr-str 'prop)))
 	(_ (signal 'org-notion-invalid-element-type type))))))
 
 (cl-defmethod org-notion-from-org ((obj org-notion-user) &optional str)
@@ -947,7 +997,13 @@ a bot. Identified by the `:id' slot.")
     (with-temp-buffer
       (insert str)
       (let* ((elt (caddr (org-element-parse-buffer)))
-	     (type (car elt)))
+	     (type (car elt))
+	     (map-key (lambda (k v)
+			(pcase k
+			  ("NOTION_USER" (setq name v))
+			  ("NOTION_ID" (setq id v))
+			  ("NOTION_EMAIL" (setq email v))
+			  ("NOTION_AVATAR_URL" (setq avatar v))))))
 	(pcase type
 	  ('headline
 	   (let* ((plst (cadr elt))
@@ -955,19 +1011,15 @@ a bot. Identified by the `:id' slot.")
 		  (p-id (plist-get plst :NOTION_ID))
 		  (p-email (plist-get plst :NOTION_EMAIL))
 		  (p-avatar (plist-get plst :NOTION_AVATAR)))
-	     (setq name p-usr)
-	     (setq id p-id)
-	     (setq email p-email)
-	     (setq avatar p-avatar)))
+	     (setq name p-usr
+		   id p-id
+		   email p-email
+		   avatar p-avatar)))
 	  ('keyword
 	   (let* ((plst (cadr elt))
 		  (key (plist-get plst :key))
 		  (val (plist-get plst :value)))
-	     (pcase key
-	       ("NOTION_USER" (setq name val))
-	       ("NOTION_ID" (setq id val))
-	       ("NOTION_EMAIL" (setq email val))
-	       ("NOTION_AVATAR" (setq avatar val)))))
+	     (map-key key val)))
 	  ('section
 	   (let ((keywords (nthcdr 2 elt)))
 	     (dolist (kw keywords)
@@ -976,11 +1028,7 @@ a bot. Identified by the `:id' slot.")
 			  (key (plist-get plst :key))
 			  (val (plist-get plst :value)))
 		     (message "%s %s" key val)
-		     (pcase key
-		       ("NOTION_USER" (setq name val))
-		       ("NOTION_ID" (setq id val))
-		       ("NOTION_EMAIL" (setq email val))
-		       ("NOTION_AVATAR_URL" (setq avatar val))))))))
+		     (map-key key val))))))
 	  (_ (signal 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
 	obj))))
@@ -1038,23 +1086,25 @@ a bot. Identified by the `:id' slot.")
   ;; quick check
   (if (string= (alist-get 'object json) "database")
       (progn
-	(oset obj :id (alist-get 'id json))
-	(oset obj :title (cdr 		; down the rabbit-hole we go
-			  (cadr
-			   (cadr
-			    (mapcan
-			     (lambda (x)
-			       (if (listp x) x nil))
-			     (alist-get 'title json)))))) ; this is a vector
-	(oset obj :created (alist-get 'created_time json))
-	(oset obj :updated (alist-get 'last_edited_time json))
-	(oset obj :icon (alist-get 'icon json))
-	(oset obj :cover (alist-get 'cover json))
-	(oset obj :properties (alist-get 'properties json))
-	(oset obj :parent (org-notion-parse-parent json))
-	(oset obj :url (alist-get 'url json))
-	(cache-instance obj))
-    (error "expected database object, found %s" (alist-get 'object json)))
+	(oset-and
+	 obj
+	 :id (alist-get 'id json)
+	 :title (cdr 		; down the rabbit-hole we go
+		 (cadr
+		  (cadr
+		   (mapcan
+		    (lambda (x)
+		      (if (listp x) x nil))
+		    (alist-get 'title json))))) ; this is a vector
+	 :created (alist-get 'created_time json)
+	 :updated (alist-get 'last_edited_time json)
+	 :icon (alist-get 'icon json)
+	 :cover (alist-get 'cover json)
+	 :properties (alist-get 'properties json)
+	 :parent (org-notion-parse-parent json)
+	 :url (alist-get 'url json))
+	 (cache-instance obj))
+	(error "expected database object, found %s" (alist-get 'object json)))
   obj)
 
 (cl-defmethod org-notion-to-json ((obj org-notion-database))
@@ -1098,7 +1148,13 @@ a bot. Identified by the `:id' slot.")
     (with-temp-buffer
       (insert str)
       (let* ((elt (caddr (org-element-parse-buffer)))
-	     (type (car elt)))
+	     (type (car elt))
+	     (map-key (lambda (k v)
+			(pcase k
+			  ("NOTION_ID" (setq id v))
+			  ("NOTION_URL" (setq url v))
+			  ("NOTION_ICON" (setq icon v))
+			  ("NOTION_COVER" (setq cover v))))))
 	(pcase type
 	  ('headline
 	   (let* ((plst (cadr elt))
@@ -1118,11 +1174,7 @@ a bot. Identified by the `:id' slot.")
 	   (let* ((plst (cadr elt))
 		  (key (plist-get plst :key))
 		  (val (plist-get plst :value)))
-	     (pcase key
-	       ("NOTION_ID" (setq id val))
-	       ("NOTION_URL" (setq url val))
-	       ("NOTION_ICON" (setq icon val))
-	       ("NOTION_COVER" (setq cover val)))))
+	     (map-key key val)))
 	  ('section
 	   (let ((keywords (nthcdr 2 elt)))
 	     (dolist (kw keywords)
@@ -1131,11 +1183,7 @@ a bot. Identified by the `:id' slot.")
 			  (key (plist-get plst :key))
 			  (val (plist-get plst :value)))
 		     (org-notion-log key val)
-		     (pcase key
-		       ("NOTION_ID" (setq id val))
-		       ("NOTION_URL" (setq url val))
-		       ("NOTION_ICON" (setq icon val))
-		       ("NOTION_COVER" (setq cover val))))))))
+		     (map-key key val))))))
 	  (_ (error 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
 	obj))))

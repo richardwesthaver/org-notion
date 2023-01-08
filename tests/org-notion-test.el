@@ -64,15 +64,15 @@
 (ert-deftest user-from-json-ok ()
   (let ((results (org-notion--get-results (json-read-file "json/users.json"))))
     (org-notion-from-json (org-notion-user) (elt results 0))
-    (should (org-notion-from-json (org-notion-user) (elt results 0)))))
+    (should (org-notion-from-json (org-notion-user :id "140351d1-1562-dc48-80b5-f933e95b8cba") (elt results 0)))))
 
 (ert-deftest user-to-json-ok ()
-  (should (org-notion-to-json (org-notion-user))))
+  (should (org-notion-to-json (org-notion-user :id "bfa671d0-2555-0b10-bd09-6bff9d9153df"))))
 
 (ert-deftest user-to-org-ok ()
   (should (org-notion-to-org (org-notion-user :id "75d6ae70-302e-2e5f-00d9-8229dfb658c9") 'heading))
-  (should (org-notion-to-org (org-notion-user :id "524df0d1-a5ee-c70c-bb2c-7a863ce50135") 'property))
-  (should (org-notion-to-org (org-notion-user :id "b41423bc-9025-141c-8eca-469652cc524c") 'keyword)))
+  (should (org-notion-to-org (org-notion-user :id "524df0d1-a5ee-c70c-bb2c-7a863ce50135") 'prop))
+  (should (org-notion-to-org (org-notion-user :id "b41423bc-9025-141c-8eca-469652cc524c") 'kw)))
 
 ;; TODO 2022-12-27
 (ert-deftest user-from-org-ok ()
