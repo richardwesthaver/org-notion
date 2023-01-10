@@ -26,11 +26,10 @@
 (require 'org-notion (expand-file-name "../org-notion"))
 (require 'ert)
 
-(defvar org-notion-load-utils nil)
-(when org-notion-load-utils (require 'org-notion-utils "org-notion-utils"))
-
 ;; prefer to conditionally enable caching when needed
 (setq-local org-notion-cache-enable nil)
+(defvar org-notion-load-utils nil)
+(when org-notion-load-utils (require 'org-notion-utils "org-notion-utils"))
 
 (defun org-notion--get-results (json)
   (when (equal (cdar json) "list")
@@ -38,7 +37,7 @@
       (dolist (i (append results nil)))
       results)))
 
-(defun org-notion--get-children (json))
+;; (defun org-notion--get-children (json))
 
 (defvar org-notion--mock-file (expand-file-name "mock.org"))
 
@@ -46,19 +45,24 @@
   (with-current-buffer (find-file-noselect org-notion--mock-file)
     (org-element-parse-buffer)))
 
+(defmacro should= (a b &optional test)
+  "(should (equal/TEST A B))"
+  `(should (,(or test 'equal) ,a ,b)))
+
 (ert-deftest consts-ok ()
-  (should (equal org-notion-version "2021-08-16"))
-  (should (equal org-notion-host "api.notion.com"))
-  (should (equal org-notion-endpoint "https://api.notion.com/v1/")))
+	     (should= org-notion-version "2021-08-16")
+	     (should= org-notion-host "api.notion.com")
+	     (should= org-notion-endpoint "https://api.notion.com/v1/"))
 
 (ert-deftest no-auth-source-ok ()
   (let ((org-notion-use-auth-source nil))
-    (should (equal (org-notion-token "token-test") "token-test"))))
+    (should= (org-notion-token "token-test") "token-test")))
 
 ;; FIXME 2022-01-02: currently requires ~/.authinfo.gpg
 (ert-deftest auth-source-ok ()
   (let ((org-notion-use-auth-source t))
-    (should (org-notion-token))))
+    (should (org-notion-token)))
+  (should (org-notion-token)))
 
 (ert-deftest get-current-user-ok () (should (org-notion-get-current-user)))
 
@@ -73,13 +77,14 @@
   (should (org-notion-to-json (org-notion-user :id "bfa671d0-2555-0b10-bd09-6bff9d9153df"))))
 
 (ert-deftest user-to-org-ok ()
-  (should (org-notion-to-org (org-notion-user :id "75d6ae70-302e-2e5f-00d9-8229dfb658c9") 'heading))
-  (should (org-notion-to-org (org-notion-user :id "524df0d1-a5ee-c70c-bb2c-7a863ce50135") 'prop))
-  (should (org-notion-to-org (org-notion-user :id "b41423bc-9025-141c-8eca-469652cc524c") 'kw)))
+  (should (org-notion-to-org (org-notion-user :name "miss mischief" :id "75d6ae70-302e-2e5f-00d9-8229dfb658c9") 'heading))
+  (should (org-notion-to-org (org-notion-user :name "dude man" :id "524df0d1-a5ee-c70c-bb2c-7a863ce50135") 'prop))
+  (should (org-notion-to-org (org-notion-user :name "some guy" :id "b41423bc-9025-141c-8eca-469652cc524c") 'kw)))
 
 ;; TODO 2022-12-27
 (ert-deftest user-from-org-ok ()
-  (let ((data org-notion--mock-data))
+  (let ((mock org-notion--mock-data))
+    ;; (should (org-notion-from-org (org-notion-user) ))
     ))
 
 (ert-deftest db-from-json-ok ()

@@ -346,12 +346,12 @@ signaling `org-notion-error' types."
 (defun org-notion-field-assoc (sym)
   "Return the member of `org-notion-field-names' associated with SYM
 in `org-notion-field-org-keys'."
-  (assoc sym org-notion-field-org-keys))
+  (cdr (assoc sym org-notion-field-org-keys)))
 
 (defun org-notion-field-rassoc (str)
   "Return the member of `org-notion-field-abbrevs' associated with
 STR in `org-notion-field-org-keys'."
-  (rassoc str org-notion-field-org-keys))
+  (car (rassoc str org-notion-field-org-keys)))
 
 (defun org-notion-class-get (sym)
   "Return the org-element property key name (a string) associated
@@ -373,12 +373,13 @@ with SYM in `org-notion-class-keys'."
   "Create an org-element TYPE given KEY and VAL.
 KEY is looked up in `org-notion-field-org-keys' and "
   (let ((key (pcase key
-	       ((pred symbolp) (org-notion-field-get key))
+	       ((pred symbolp) (org-notion-field-assoc key))
 	       ((pred stringp) key)
 	       ('nil (signal 'org-notion-invalid-key key)))))
-  (pcase type
-    ((or 'kw 'keyword) (org-notion--kw key val))
-    ((or 'nil 'prop 'node-prop 'node-property) (org-notion--node-prop key val)))))
+    (unless (null val) (pcase type
+       ((or 'kw 'keyword) (org-notion--kw key val))
+       ((or 'nil 'prop 'node-prop 'node-property)
+	(org-notion--node-prop key val))))))
 
 (defun org-notion--property-drawer (alist)
   "Given an ALIST of (KEY . VAL) pairs. create an org-element
@@ -386,9 +387,8 @@ property-drawer."
   (let ((res 'property-drawer)
 	(props))
     (dolist (kv alist props)
-      (push
-       (org-notion--prop (car kv) (cdr kv) 'prop)
-       props))
+      (when-let ((k (car kv)) (v (cdr kv)))
+	(push (org-notion--prop k v 'prop) props)))
     (setq res (list res nil props))
     res))
 
@@ -463,7 +463,7 @@ Example: \"2012-01-09T08:59:15.000Z\" becomes \"2012-01-09
 (defun org-notion-id-at-point (&optional pom)
   "Get the org-notion-id at point. Checks
 headline at POM first, then buffer keywords."
-  (let ((id (org-notion-field-get 'id)))
+  (let ((id (org-notion-field-assoc 'id)))
   (org-with-point-at pom
     (or (thing-at-point 'uuid t)
      (cdr (assoc id (org-entry-properties)))
@@ -925,16 +925,16 @@ is non-nil."
 ;;;;; User
 (defclass org-notion-user (org-notion-object)
   ((type
-    :initform ""
+    :initform nil
     :initarg :type
-    :type string
+    :type (or symbol null)
     :accessor org-notion-type
     :documentation "Type of the user. This slot should be either
     'person' or 'bot'.")
    (name
-    :initform ""
+    :initform nil
     :initarg :name
-    :type string
+    :type (or string null)
     :accessor org-notion-user-name
     :documentation "User's name, as displayed in Notion.")
    (avatar
@@ -965,7 +965,8 @@ a bot. Identified by the `:id' slot.")
 	(oset-and
 	 obj
 	 :id (alist-get 'id json)
-	 :type (alist-get 'type json)        
+	 :type (if-let ((type (alist-get 'type json)))
+		   (intern type) nil)
 	 :name (alist-get 'name json)        
 	 :avatar (alist-get 'avatar_url json)
 	 :email (alist-get 'email json)      
@@ -978,12 +979,12 @@ a bot. Identified by the `:id' slot.")
   (with-slots (id type name avatar email owner) obj
     (list (cons 'object "user") (cons 'id id)
 	  (cons 'name name) (cons 'avatar_url avatar)
-	  (cons 'type type))))
+	  (cons 'type (symbol-name type)))))
 
 (cl-defmethod org-notion-to-org ((obj org-notion-user) &optional type)
   "Convert user to org-element TYPE."
   (with-slots (id usr-type name avatar email owner) obj
-    (let* ((usr-str (format "%s %s" name (if email (format "<%s>" email))))
+    (let* ((usr-str (concat name " " (when email (format "<%s>" email))))
 	   (props
 	    (unless (not '(id avatar email))
 	      (org-notion--property-drawer
@@ -1020,7 +1021,7 @@ a bot. Identified by the `:id' slot.")
 		  (p-usr (or (plist-get plst :NOTION_USER) (plist-get plst :title)))
 		  (p-id (plist-get plst :NOTION_ID))
 		  (p-email (plist-get plst :NOTION_EMAIL))
-		  (p-avatar (plist-get plst :NOTION_AVATAR)))
+		  (p-avatar (plist-get plst :NOTION_AVATAR_URL)))
 	     (setq name p-usr
 		   id p-id
 		   email p-email
