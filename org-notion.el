@@ -306,42 +306,27 @@ signaling `org-notion-error' types."
 	    (eq org-notion-verbosity 'debug))
     (princ s)))
 
-(defmacro oref-or (obj slot)
+(defun oref-or (obj slot)
   "Get the value of object or class."
-  (declare (debug (form symbolp form)))
-  `(cond
-    ((class-p ,obj) (eieio-oref-default ,obj ',slot))
-    ((eieio-object-p ,obj) (eieio-oref ,obj ',slot))))
+  (cond
+    ((class-p obj) (eieio-oref-default obj slot))
+    ((eieio-object-p obj) (eieio-oref obj slot))))
 
-(defmacro oref-and (obj &rest args)
-  "Get the value of SLOTs in OBJ. Uses `oref-or' internally."
-  (declare (debug (&rest [org-notion-place form])))
-  (if (and args (null (cdr args)))
-      (let ((slot (pop args)))
-	`(oref-or ,obj ,slot ,val))
-      (let ((sets nil))
-	(while args (push `(oref-or ,obj ,(pop args)) sets))
-	(cons 'progn (nreverse sets)))))
+(defun oref-and (obj &rest slots)
+  "Return a list of values bound to SLOTS in OBJ. Uses `oref-or' internally."
+  (mapcar (lambda (x) (oref-or obj x)) slots))
 
-(defmacro oset-or (obj slot value)
+(defun oset-or (obj slot value)
   "Set the value of object or class."
-  (declare (debug (form symbolp form)))
-  `(cond
-    ((class-p ,obj) (eieio-oset-default ,obj ',slot ,value))
-    ((eieio-object-p ,obj) (eieio-oset ,obj ',slot ,value))))
+  (cond
+    ((class-p obj) (eieio-oset-default obj slot value))
+    ((eieio-object-p obj) (eieio-oset obj slot value))))
 
-(defmacro oset-and (obj &rest args)
+(defun oset-and (obj &rest args)
   "Set each SLOT to VALUE in OBJ. Uses `oset-or' internally."
-  (declare (debug (&rest [org-notion-place form])))
   (if (/= (logand (length args) 1) 0)
       (signal 'wrong-number-of-arguments (list 'oset-and (length args)))
-    (if (and args (null (cddr args)))
-	(let ((slot (pop args))
-	      (val (pop args)))
-	  `(oset-or ,obj ,slot ,val))
-      (let ((sets nil))
-	(while args (push `(oset-or ,obj ,(pop args) ,(pop args)) sets))
-	(cons 'progn (nreverse sets))))))
+      (while args (oset-or obj (pop args) (pop args)))))
 
 (defun org-notion-field-assoc (sym)
   "Return the member of `org-notion-field-names' associated with SYM
@@ -373,9 +358,9 @@ with SYM in `org-notion-class-keys'."
   "Create an org-element TYPE given KEY and VAL.
 KEY is looked up in `org-notion-field-org-keys' and "
   (let ((key (pcase key
-	       ((pred symbolp) (org-notion-field-assoc key))
+	       ((and (pred symbolp) (pred (not null))) (org-notion-field-assoc key))
 	       ((pred stringp) key)
-	       ('nil (signal 'org-notion-invalid-key key)))))
+	       (_ (signal 'org-notion-invalid-key key)))))
     (unless (null val) (pcase type
        ((or 'kw 'keyword) (org-notion--kw key val))
        ((or 'nil 'prop 'node-prop 'node-property)
@@ -1009,12 +994,13 @@ a bot. Identified by the `:id' slot.")
       (insert str)
       (let* ((elt (caddr (org-element-parse-buffer)))
 	     (type (car elt))
-	     (map-key (lambda (k v)
+	     (map-key nil))
+	(fset map-key (lambda (k v)
 			(pcase k
 			  ("NOTION_USER" (setq name v))
 			  ("NOTION_ID" (setq id v))
 			  ("NOTION_EMAIL" (setq email v))
-			  ("NOTION_AVATAR_URL" (setq avatar v))))))
+			  ("NOTION_AVATAR_URL" (setq avatar v)))))
 	(pcase type
 	  ('headline
 	   (let* ((plst (cadr elt))
@@ -1160,12 +1146,13 @@ a bot. Identified by the `:id' slot.")
       (insert str)
       (let* ((elt (caddr (org-element-parse-buffer)))
 	     (type (car elt))
-	     (map-key (lambda (k v)
-			(pcase k
-			  ("NOTION_ID" (setq id v))
-			  ("NOTION_URL" (setq url v))
-			  ("NOTION_ICON" (setq icon v))
-			  ("NOTION_COVER" (setq cover v))))))
+	     (map-key nil))
+	(fset map-key (lambda (k v)
+	   (pcase k
+	     ("NOTION_ID" (setq id v))
+	     ("NOTION_URL" (setq url v))
+	     ("NOTION_ICON" (setq icon v))
+	     ("NOTION_COVER" (setq cover v)))))
 	(pcase type
 	  ('headline
 	   (let* ((plst (cadr elt))
@@ -1573,7 +1560,7 @@ enabled."
   (org-notion-dispatch
    (org-notion-request
     :method 'database
-    :data (id . query)
+    :data (cons id query)
     :callback (org-notion-with-callback
 		(when (equal (cdar json-data) "list")
 		  json-data)))))
@@ -1653,6 +1640,7 @@ be \"page\" or \"database\"."
 
 ;;; Org
 ;;;; Parsers
+;; TODO 2023-01-10
 (defun org-notion-parse-buffer (&optional visible-only)
   "Recursively parse the buffer and return an
  `org-notion-object'.
@@ -1662,12 +1650,11 @@ elements.
 "
   (interactive)
   (with-current-buffer (current-buffer)
-    (let ((tree (org-notion-parse-buffer 'object visible-only)))
-      (org-notion-dbg tree))))
+    (let ((tree (org-notion-parse-buffer visible-only)))
+      tree)))
 
 (defun org-notion-parse-element (str &optional type)
-  "Parse STR as `org-notion-object' TYPE."
-  )
+  "Parse STR as `org-notion-object' TYPE.")
 
 ;;;; Commands
 ;;;###autoload
@@ -1676,7 +1663,7 @@ elements.
   (interactive "sID: ")
   (if-let ((id (or uuid (org-notion-id-at-point))))
       (browse-url (format "https://www.notion.so/%s" id))
-    (message "failed to find %s" org-notion-id-property)))
+    (message "failed to find %s" (org-notion-field-assoc 'id))))
 
 ;;;###autoload
 (defun org-notion-push (&optional subtree)
