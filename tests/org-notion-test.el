@@ -27,9 +27,9 @@
 (require 'ert)
 
 ;; prefer to conditionally enable caching when needed
-(setq-local org-notion-cache-enable nil)
-(defvar org-notion-load-utils nil)
-(when org-notion-load-utils (require 'org-notion-utils "org-notion-utils"))
+(setq-local org-notion-cache-overwrite t)
+(defvar org-notion-load-utils t)
+(when org-notion-load-utils (require 'org-notion-utils (expand-file-name "org-notion-utils")))
 
 (defun org-notion--get-results (json)
   (when (equal (cdar json) "list")
@@ -49,11 +49,6 @@
   "(should (equal/TEST A B))"
   `(should (,(or test 'equal) ,a ,b)))
 
-(ert-deftest consts-ok ()
-	     (should= org-notion-version "2021-08-16")
-	     (should= org-notion-host "api.notion.com")
-	     (should= org-notion-endpoint "https://api.notion.com/v1/"))
-
 (ert-deftest no-auth-source-ok ()
   (let ((org-notion-use-auth-source nil))
     (should= (org-notion-token "token-test") "token-test")))
@@ -63,6 +58,19 @@
   (let ((org-notion-use-auth-source t))
     (should (org-notion-token)))
   (should (org-notion-token)))
+
+(ert-deftest cache-overwrite-ok ()
+  (let ((org-notion-cache-overwrite t))
+    (should (cache-instance (org-notion-user)))
+    (setf org-notion-cache-overwrite nil)
+    (should= nil (cache-instance (org-notion-page)))))
+
+(ert-deftest cache-enable-ok ()
+  (let ((org-notion-cache-enable t))
+    (org-notion-clear-cache)
+    (should (cache-instance (org-notion-database :id "c872ca0c-fdfe-db54-a4df-b9168de9fa52")))
+    (setf org-notion-cache-enable nil)
+    (should= nil (cache-instance (org-notion-database :id "c872ca0c-fdfe-db54-a4df-b9168de9fa52")))))
 
 (ert-deftest get-current-user-ok () (should (org-notion-get-current-user)))
 
@@ -132,7 +140,7 @@
 
 (ert-deftest search-ok ()
   (let ((q "org-notion"))
-    (should (org-notion-search q "ascending" nil))
+    (should (org-notion-search q "ascending"))
     (should (org-notion-search q "descending" "page"))
     (should (org-notion-search "" nil "database"))))
 

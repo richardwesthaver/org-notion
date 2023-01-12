@@ -36,7 +36,7 @@
 (require 'url)
 
 ;;; Constants
-
+;; 
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an entry with
 `auth-source-secrets-create'.")
@@ -107,7 +107,7 @@ block type.")
   "Notion default property_item names.")
 
 ;;; Custom
-
+;; 
 (defgroup org-notion nil
   "Customization group for org-notion."
   :tag "Org Notion"
@@ -131,6 +131,15 @@ attempting to insert a duplicate object, which occurs often in
 testing and cause `should' to return unexpected results."
   :type 'boolean
   :group 'org-notion)
+
+(defcustom org-notion-cache-overwrite nil
+  "Enable org-notion-cache overwrite on insert if value is non-nil. By
+default, duplicate inserts into the cache will log a message
+without modifying the current value. When this is enabled, a
+message is still logged (disable with `org-notion-verbosity'),
+but the current value is replaced."
+  :group 'org-notion
+  :type 'boolean)
 
 (defcustom org-notion-completion-ignore-case t
   "org-notion specific value of `completion-ignore-case'"
@@ -175,7 +184,7 @@ completion is offered.
   :group 'org-notion)
 
 ;;; Vars
-
+;; 
 (defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
     "URI of Notion API endpoint")
 
@@ -244,11 +253,11 @@ node-property or keyword names (:key).")
 org-notion-class type names, i.e. org-notion-database.")
 
 (defvar org-notion-class-names
-  (-flatten (mapcar #'(lambda (i) (car i)) org-notion-class-keys))
+  (flatten-list (mapcar #'(lambda (i) (car i)) org-notion-class-keys))
   "`org-notion-class' type abbreviations.")
 
 ;;; Errors
-
+;; 
 (define-error 'org-notion-error "Unknown org-notion error")
 (define-error 'org-notion-invalid-key "Invalid key value")
 (define-error 'org-notion-invalid-uuid "Invalid UUID" 'org-notion-error)
@@ -296,9 +305,9 @@ signaling `org-notion-error' types."
 ;;;###autoload
 (def-edebug-elem-spec 'org-notion-place '(form))
 
-(defun org-notion-log (&rest s)
-  "Log a message."
-  (message "%s" s))
+(defmacro org-notion-log (str &rest args)
+  "Log a message with format STR given ARGS"
+  `(message ,str ,@args))
 
 (defun org-notion-dbg (&rest s)
   "Print an object."
@@ -356,7 +365,9 @@ with SYM in `org-notion-class-keys'."
 
 (defun org-notion--prop (key val &optional type)
   "Create an org-element TYPE given KEY and VAL.
-KEY is looked up in `org-notion-field-org-keys' and "
+If KEY is a non-nil symbol it is looked up in
+`org-notion-field-org-keys' via `org-notion-field-assoc' and
+replaced with the associated string value."
   (let ((key (pcase key
 	       ((and (pred symbolp) (pred (not null))) (org-notion-field-assoc key))
 	       ((pred stringp) key)
@@ -475,7 +486,7 @@ further processed by BODY before being returned by
 
 (defun org-notion-callback-default ()
   "Read json string from `org-notion-dispatch' status buffer and return output"
-  (org-notion-with-callback (org-notion-dbg json-data)))
+  (org-notion-with-callback (org-notion-log "%s" json-data)))
 
 ;;;; Auth
 (defun org-notion-token (&optional token)
@@ -857,14 +868,21 @@ are lists of values."
 initialization arguments. This will not update a duplicate
 hash. The old one is always kept.
 
-Note that this function is a no-op if `org-notion-cache-enable'
-is non-nil."
+This function is a no-op if `org-notion-cache-enable' is non-nil.
+
+If `org-notion-cache-overwrite' is non-nil, insert value even if
+duplicate is detected."
   (when org-notion-cache-enable
     (let ((table (symbol-value (oref this cache)))
 	  (key (org-notion-id this)))
-      (if (not (gethash key table))
-	  (puthash key this table)
-	(org-notion-log (format "duplicate key: %s" key))))))
+      (if (gethash key table)
+	(if org-notion-cache-overwrite
+	    (progn
+	      (org-notion-log "duplicate key: %s" key)
+	      (puthash key this table))
+	  (org-notion-log "duplicate key: %s" key)
+	  nil)
+	(puthash key this table)))))
 
 (cl-defmethod delete-instance ((this org-notion-cache))
   "Remove THIS from cache."
@@ -1180,7 +1198,7 @@ a bot. Identified by the `:id' slot.")
 		   (let* ((plst (cadr kw))
 			  (key (plist-get plst :key))
 			  (val (plist-get plst :value)))
-		     (org-notion-log key val)
+		     (org-notion-log "%s" key val)
 		     (map-key key val))))))
 	  (_ (error 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
@@ -1627,16 +1645,15 @@ SORT should be \"ascending\" or \"descending\" and FILTER should
 be \"page\" or \"database\"."
   (interactive
    "squery: ")
-  (let ((_res))
-    (org-notion-dispatch
-     (org-notion-request
-      :method 'search
-      :data (org-notion-search-data query sort filter)
-      :callback (org-notion-with-callback
-		  (when (equal (cdar json-data) "list")
-		    (let ((results (alist-get 'results json-data)))
-		      (org-notion-log results)
-		      (setq org-notion-last-dispatch-result results))))))))
+  (org-notion-dispatch
+    (org-notion-request
+     :method 'search
+     :data (org-notion-search-data query sort filter)
+     :callback (org-notion-with-callback
+		 (when (equal (cdar json-data) "list")
+		   (let ((results (alist-get 'results json-data)))
+		     (org-notion-log "%s" results)
+		     (setq org-notion-last-dispatch-result results)))))))
 
 ;;; Org
 ;;;; Parsers
