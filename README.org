@@ -1,5 +1,5 @@
 #+TITLE: org-notion
-#+DATE: 2023-01-08
+#+DATE: 2023-01-15
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
@@ -16,21 +16,10 @@ realtime collaboration, and as of 2021 an [[https://developers.notion.com/][offi
 beauty of Notion with your Org-mode workflow.
 
 * Overview
-Many moons ago I used Notion.so as a notes and collaboration tool
-for work. It's easy to use and is (in my opinion) the best
-web-based solution out there. I have always used Org-mode for
-personal ventures of course, but it is a pain to integrate with
-non-tech folks. Even tech folks will roll their eyes if your
-company-hosted repo has a README.org instead of the tried and true
-README.md. I decided to abandon Notion.so because I couldn't wait
-for the overdue official API to be released, and was unsatisfied
-with the unofficial variants. Nowadays, that story has changed. As
-of 2021 the official API is available and ready for action.
-
 This package wraps the full Notion API with support for all web
-requests and object types. The requests are dispatched asynchronously
-via the methods specializing on the =org-notion-request= EIEIO class
-instance. The responses are parsed to create a subclass instance of
+requests and object types. The requests are dispatched via the methods
+specializing on the =org-notion-request= EIEIO class instance. The
+responses are parsed to create a subclass instance of
 =org-notion-object= which contain the actual contents as
 =org-notion-rich-text= instances. This is the low-level interface
 which can be hacked to your liking.
@@ -130,6 +119,10 @@ defauls are show below.
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
 
 * COMMENT notes
+** v2 roadmap
+*** user capabilities
+  - account for user capabilities
+    - early handling when caps are invalid for method
 ** tasks
 *** TODO implement to/from-json and to/from-org
   - org-notion-object           

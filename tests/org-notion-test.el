@@ -77,7 +77,7 @@
 (ert-deftest get-users-ok () (should (org-notion-get-users)))
 
 (ert-deftest user-from-json-ok ()
-  (let ((results (org-notion--get-results (json-read-file "json/users.json"))))
+  (let ((results (org-notion--get-results (json-read-file (expand-file-name"json/users.json")))))
     (org-notion-from-json (org-notion-user) (elt results 0))
     (should (org-notion-from-json (org-notion-user :id "140351d1-1562-dc48-80b5-f933e95b8cba") (elt results 0)))))
 
@@ -96,7 +96,7 @@
     ))
 
 (ert-deftest db-from-json-ok ()
-  (let ((db (json-read-file "json/database.json")))
+  (let ((db (json-read-file (expand-file-name"json/database.json"))))
     (should (org-notion-from-json (org-notion-database) db))))
 
 (ert-deftest db-to-json-ok ()
@@ -107,6 +107,10 @@
 
 ;; TODO 2022-12-27
 (ert-deftest db-from-org-ok ())
+
+(ert-deftest parent-obj-json-ok ()
+  (let ((parent '(parent (type . "database_id") (database_id . "bfafc302-c639-447b-ab32-d5bdabf2ba0c"))))
+    (should= parent (org-notion-to-json (org-notion-from-json (org-notion-parent-obj) parent)))))
 
 (ert-deftest page-from-json-ok ())
 (ert-deftest page-to-json-ok ())
@@ -155,7 +159,7 @@
 
 (ert-deftest id-at-point-ok ()
   (with-temp-buffer
-    (insert-file-contents "mock.org")
+    (insert-file-contents (expand-file-name "mock.org"))
     (let ((id "64adb50d17394203a31265641aeaeb8e")
 	  (pom (point-min)))
       (should (equal (org-notion-id-at-point pom) id)))))

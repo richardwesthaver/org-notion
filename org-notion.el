@@ -104,7 +104,10 @@ block type.")
 						title people files checkbox
 						url email phone_number created_time
 						created_by last_edited_time last_edited_by)
-  "Notion default property_item names.")
+  "Notion default property_item types.")
+
+(defconst org-notion-parent-types '(database page workspace block)
+  "Notion parent object types.")
 
 ;;; Custom
 ;; 
@@ -235,10 +238,10 @@ calls to `org-notion-dispatch' (:async nil).")
 node-property or keyword names (:key).")
 
 (defvar org-notion-field-abbrevs (mapcar #'car org-notion-field-org-keys)
-  "L1 field short names.")
+  "Org-notion field short names.")
 
 (defvar org-notion-field-names (mapcar #'cdr org-notion-field-org-keys)
-  "L1 field full names as string.")
+  "Org-notion field full names as string.")
 
 (defvar org-notion-class-keys
   '((database . org-notion-database)
@@ -252,15 +255,20 @@ node-property or keyword names (:key).")
   "Mapping of short names such as \"database\" to
 org-notion-class type names, i.e. org-notion-database.")
 
-(defvar org-notion-class-names
+(defvar org-notion-class-abbrevs
   (flatten-list (mapcar #'(lambda (i) (car i)) org-notion-class-keys))
   "`org-notion-class' type abbreviations.")
+
+(defvar org-notion-classes
+  (flatten-list (mapcar #'(lambda (i) (cdr i)) org-notion-class-keys))
+  "List of `org-notion-class' symbols.")
 
 ;;; Errors
 ;; 
 (define-error 'org-notion-error "Unknown org-notion error")
-(define-error 'org-notion-invalid-key "Invalid key value")
+(define-error 'org-notion-invalid-key "Invalid key value" 'org-notion-error)
 (define-error 'org-notion-invalid-uuid "Invalid UUID" 'org-notion-error)
+(define-error 'org-notion-invalid-object "Invalid object" 'org-notion-error)
 (define-error 'org-notion-invalid-method "Invalid API method" 'org-notion-error)
 (define-error 'org-notion-invalid-element-type "Invalid Org element type" 'org-notion-error)
 (define-error 'org-notion-bad-time "Bad time spec" 'org-notion-error)
@@ -301,7 +309,7 @@ signaling `org-notion-error' types."
       (signal err msg))))
 
 ;;; Utils
-
+;; 
 ;;;###autoload
 (def-edebug-elem-spec 'org-notion-place '(form))
 
@@ -338,19 +346,28 @@ signaling `org-notion-error' types."
       (while args (oset-or obj (pop args) (pop args)))))
 
 (defun org-notion-field-assoc (sym)
-  "Return the member of `org-notion-field-names' associated with SYM
+  "Return the cdr of `org-notion-field-names' associated with car SYM
 in `org-notion-field-org-keys'."
-  (cdr (assoc sym org-notion-field-org-keys)))
+  (when-let ((res (assoc sym org-notion-field-org-keys)))
+    (cdr res)))
 
 (defun org-notion-field-rassoc (str)
-  "Return the member of `org-notion-field-abbrevs' associated with
+  "Return the member of `org-notion-field-abbrevs' associated with cdr
 STR in `org-notion-field-org-keys'."
-  (car (rassoc str org-notion-field-org-keys)))
+  (when-let ((res (rassoc str org-notion-field-org-keys)))
+    (car res)))
 
-(defun org-notion-class-get (sym)
-  "Return the org-element property key name (a string) associated
-with SYM in `org-notion-class-keys'."
-  (alist-get sym org-notion-class-keys))
+(defun org-notion-class-assoc (sym)
+  "Return the member of `org-notion-classes' associated with car SYM
+in `org-notion-class-keys'."
+  (when-let ((res (rassoc str org-notion-class-keys)))
+    (cdr res)))
+
+(defun org-notion-class-rassoc (str)
+  "Return the member of `org-notion-class-abbrevs' associated with cdr
+STR in `org-notion-class-keys'."
+  (when-let ((res (rassoc str org-notion-class-keys)))
+    (car res)))
 
 (defun org-notion--kv (key val)
   (list :key key :value val))
@@ -403,6 +420,13 @@ property-drawer."
   "Filter JSON-ARRAY (an array of results from the Notion API),
  where :object = OBJ-TYP (a string)."
   (seq-filter (lambda (a) (if (equal obj-typ (cdar a)) t nil)) json-array))
+
+(defun org-notion--get-flag (sym json)
+  "Return the value of SYM in alist JSON. If value is :json-false, return nil."
+  (let ((val (alist-get sym json)))
+    (cond
+     ((eq val :json-false) nil )
+     ('_ val))))
 
 (defsubst org-notion-string= (str1 str2)
   "Return t if strings STR1 and STR2 are equal, ignoring case."
@@ -466,7 +490,7 @@ headline at POM first, then buffer keywords."
      (cadr (assoc id (org-collect-keywords (list id))))))))
 
 ;;;; Callbacks
-
+;; 
 (defmacro org-notion-with-callback (&rest body)
   "Evaluate BODY as a callback for `org-notion-dispatch'. Errors are
 automatically handled and then `org-notion-last-dispatch-result'
@@ -489,6 +513,7 @@ further processed by BODY before being returned by
   (org-notion-with-callback (org-notion-log "%s" json-data)))
 
 ;;;; Auth
+;; 
 (defun org-notion-token (&optional token)
   "Find the Notion API Integration Token.
 If `org-notion-use-auth-source' is t check auth-source first. If
@@ -496,7 +521,7 @@ nil or TOKEN missing, prompt for token.  You can generate a new
 token at URL `https://www.notion.so/my-integrations'."
   (interactive)
   (if org-notion-use-auth-source
-              (let ((auth-source-creation-defaults '((user . "org-notion")
+      (let ((auth-source-creation-defaults '((user . "org-notion")
 					     (port . "443")))
 	    (found (nth 0 (auth-source-search
 			   :host org-notion-host
@@ -506,13 +531,13 @@ token at URL `https://www.notion.so/my-integrations'."
 	(when found
 	  (let ((sec (plist-get found :secret)))
 	    (if (functionp sec)
-		        (funcall sec)
-	          sec))))
+		(funcall sec)
+	      sec))))
     (or token
 	(read-passwd "Notion API Token: "))))
 
 ;;; OOP
-
+;; 
 ;; Default superclass. This is inherited by all other org-notion
 ;; classes and should only define new static methods. The only method
 ;; implemented is `org-notion-print' which simply prints the fields of
@@ -534,7 +559,7 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 		    slots)))))
 
 ;;;; Requests
-
+;; 
 (defun org-notion-search-data (query &optional sort filter start_cursor page_size)
   "Prepare data for Notion search request. Return a json object.
 
@@ -617,7 +642,23 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
     (when cover)
     data))
 
-(defun org-notion-block-data ())
+(defclass org-notion-request-data (org-notion-class)
+  ((id
+    :initform nil
+    :type (or null string)
+    :initarg :id
+    :documentation "ID associated with this request, if any.")
+   (body
+    :initform nil
+    :type (or null list)
+    :initarg :body
+    :documentation "JSON body associated with this request, if any.")))
+
+(defun org-notion-block-update-data (obj)
+  "Prepare data for Notion update-block request. Return a json object."
+  (if (org-notion-block-p obj)
+      (org-notion-request-data :id (org-notion-id obj) :body (org-notion-to-json obj))
+    (signal 'org-notion-invalid-object obj)))
 
 ;; Stand-alone class for making HTTP requests to the Notion API.
 (defclass org-notion-request (org-notion-class)
@@ -642,7 +683,7 @@ START_CURSOR is an ID and PAGE_SIZE is an integer."
    (data
     :initform nil
     :initarg :data
-    :type (or null list string)
+    :type (or null list string org-notion-request-data)
     :documentation "Payload to be sent with HTTP request.")
    (callback
     :initform (org-notion-callback-default)
@@ -752,12 +793,15 @@ return `org-notion-last-dispatch-result'. When async is nil
 	;; archived: bool
 	('update-block
 	 (let ((url-request-method "PATCH")
-	       (url (concat endpoint "blocks/%s" data)))
+	       (url (concat endpoint "blocks/%s" (oref data :id)))
+	       (url-request-data (oref data :body)))
 	   (url-retrieve url callback nil nil nil)))
 	;; children: <blocks>
+	;; maximum depth of nesting for each append request is 2 (!!)
 	('append-block
 	 (let ((url-request-method "PATCH")
-	       (url (concat endpoint "blocks/%s/children" data)))
+	       (url (concat endpoint "blocks/%s/children" (oref data :id)))
+	       (url-request-data (oref data :body)))
 	   (url-retrieve url callback nil nil nil)))
 	('delete-block
 	 (let ((url-request-method "DELETE")
@@ -771,13 +815,14 @@ return `org-notion-last-dispatch-result'. When async is nil
 	  org-notion-last-dispatch-result)))))
 
 ;;;; Cache
+;; 
 (defsubst org-notion-objects (&optional class)
   "Return a list of all org-notion class instances. if CLASS is
 given, only show instances of this class."
   (if class
-          (seq-filter
+      (seq-filter
        (lambda (o)
-	   (same-class-p o class))
+	 (same-class-p o class))
        (hash-table-values org-notion-hashtable))
     (hash-table-values org-notion-hashtable)))
 
@@ -895,7 +940,7 @@ duplicate is detected."
   (puthash (org-notion-id this) this (symbol-value (oref this cache))))
 
 ;;;; Object methods
-
+;; 
 ;; The following generic functions are implemented by
 ;; `org-notion-object' subclasses.
 
@@ -912,7 +957,7 @@ duplicate is detected."
   "Interpret `org-notion-object' OBJ as Org-mode syntax TYPE.")
 
 ;;;; Objects
-
+;; 
 ;; Parent class of Notion objects. The 'id' slot is inherited by
 ;; subclasses. 'cache' is a variable used to store instances.
 (defclass org-notion-object (org-notion-class org-notion-cache)
@@ -926,6 +971,7 @@ duplicate is detected."
     :documentation "Top-level class for Notion API objects.")
 
 ;;;;; User
+;; 
 (defclass org-notion-user (org-notion-object)
   ((type
     :initform nil
@@ -1048,7 +1094,53 @@ a bot. Identified by the `:id' slot.")
 	(cache-instance obj)
 	obj))))
 
+
+;;;;; Property Item
+;; 
+(defclass org-notion-property-item (org-notion-object)
+  ((type
+    :initform nil
+    :initarg :type
+    :accessor org-notion-type
+    :type (or symbol null)
+    :documentation "Type of the properties. See variable `org-notion-property-types' for possible values."))
+  :documentation "Notion property_item object - identified by the `:id' slot.")
+
+(cl-defmethod org-notion-from-json ((obj org-notion-property-item)))
+(cl-defmethod org-notion-to-json ((obj org-notion-property-item)))
+(cl-defmethod org-notion-from-org ((obj org-notion-property-item) str))
+(cl-defmethod org-notion-to-org ((obj org-notion-property-item) &optional type))
+
+;;;;; Parent Object
+;; 
+(defclass org-notion-parent-obj (org-notion-object)
+  ((type
+    :initform nil
+    :initarg :type
+    :accessor org-notion-type
+    :type (or symbol null)
+    :documentation "Type of parent object. See variable `org-notion-parent-types' for possible values."))
+  :documentation "Notion parent object - identified by the `:id' slot.")
+
+(cl-defmethod org-notion-from-json ((obj org-notion-parent-obj) json)
+  (setf json (or (alist-get 'parent json) json))
+  (let* ((type (alist-get 'type json))
+	 (type_id (intern type))
+	 (id (alist-get type_id json)))
+    (oset-and obj :type (intern (if (string= type "workspace") type (substring type 0 -3))) :id id)
+    obj))
+
+(cl-defmethod org-notion-to-json ((obj org-notion-parent-obj))
+  (with-slots (id type) obj
+    (let ((type (concat (symbol-name type) "_id")))
+    `(parent (type . ,type) (,(intern type) . ,id)))))
+
+;; TODO 2023-01-15
+;; (cl-defmethod org-notion-from-org ((obj (subclass org-notion-rich-text)) str))
+;; (cl-defmethod org-notion-to-org ((obj (subclass org-notion-rich-text)) &optional type))
+
 ;;;;; Database
+;; 
 (defclass org-notion-database (org-notion-object)
   ((title
     :initform nil
@@ -1056,16 +1148,22 @@ a bot. Identified by the `:id' slot.")
     :type (or string null)
     :documentation "Name of the database as it appears in
     Notion.")
-   (created
-    :initform ""
-    :initarg :created
-    :type string
-    :documentation "Datetime when this database was created.")
-   (updated
-    :initform ""
-    :initarg :updated
-    :type string
-    :documentation "Datetime when this database was updated.")
+   (created_by
+    :initform nil
+    :initarg :created_by
+    :type (or org-notion-user null)
+    :documentation "User who created this block.")
+   (created_time
+    :initarg :created_time
+    :documentation "Datetime when this block was created.")
+   (last_edited_by
+    :initform nil
+    :initarg :last_edited_by
+    :type (or org-notion-user null)
+    :documentation "Last user to edit this block.")
+   (last_edited_time
+    :initarg :last_edited_time
+    :documentation "Datetime when this block was last edited.")
    (icon
     :initform nil
     :initarg :icon
@@ -1104,15 +1202,17 @@ a bot. Identified by the `:id' slot.")
 	(oset-and
 	 obj
 	 :id (alist-get 'id json)
-	 :title (cdr 		; down the rabbit-hole we go
+	 :title (cdr			; down the rabbit-hole we go
 		 (cadr
 		  (cadr
 		   (mapcan
 		    (lambda (x)
 		      (if (listp x) x nil))
 		    (alist-get 'title json))))) ; this is a vector
-	 :created (alist-get 'created_time json)
-	 :updated (alist-get 'last_edited_time json)
+	 :created_by (alist-get 'created_by json)
+	 :created_time (alist-get 'created_time json)
+	 :last_edited_by (alist-get 'last_edited_by json)
+	 :last_edited_time (alist-get 'last_edited_time json)
 	 :icon (alist-get 'icon json)
 	 :cover (alist-get 'cover json)
 	 :properties (alist-get 'properties json)
@@ -1124,10 +1224,10 @@ a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-to-json ((obj org-notion-database))
   "Convert database to json."
-  (with-slots (id title created updated icon cover properties parent url) obj
+  (with-slots (id title created_by created_time updated_by updated_time icon cover properties parent url) obj
     (list (cons 'object "database") (cons 'id id)
-	  (cons 'title title) (cons 'created created)
-	  (cons 'updated updated) (cons 'icon icon)
+	  (cons 'title title) (cons 'created created_time)
+	  (cons 'updated updated_time) (cons 'icon icon)
 	  (cons 'cover cover) (cons 'properties properties)
 	  (cons 'parent parent) (cons 'url url))))
 
@@ -1205,16 +1305,25 @@ a bot. Identified by the `:id' slot.")
 	obj))))
 
 ;;;;; Page
-
+;; 
 (defclass org-notion-page (org-notion-object)
-  ((created
-    :initform (format-time-string "%Y-%m-%d %T")
-    :initarg :created
-    :documentation "Datetime when this page was created.")
-   (updated
-    :initform (format-time-string "%Y-%m-%d %T")
-    :initarg :updated
-    :documentation "Datetime when this page was updated.")
+  (
+   (created_by
+    :initform nil
+    :initarg :created_by
+    :type (or org-notion-user null)
+    :documentation "User who created this block.")
+   (created_time
+    :initarg :created_time
+    :documentation "Datetime when this block was created.")
+   (last_edited_by
+    :initform nil
+    :initarg :last_edited_by
+    :type (or org-notion-user null)
+    :documentation "Last user to edit this block.")
+   (last_edited_time
+    :initarg :last_edited_time
+    :documentation "Datetime when this block was last edited.")
    (archived
     :initform nil
     :initarg :archived
@@ -1255,9 +1364,11 @@ slot.")
   (if (string= "page" (alist-get 'object json))
       (progn
 	(oset obj :id (alist-get 'id json))
-	(oset obj :created (alist-get 'created_time json))
-	(oset obj :updated (alist-get 'last_edited_time json))
-	(oset obj :archived (when (alist-get 'archived json) t))
+	(oset obj :created_by (alist-get 'created_by json))
+	(oset obj :created_time (alist-get 'created_time json))
+	(oset obj :last_edited_by (alist-get 'last_edited_by json))
+	(oset obj :last_edited_time (alist-get 'last_edited_time json))
+	(oset obj :archived (org-notion--get-flag 'archived json))
 	(oset obj :icon (alist-get 'icon json))
 	(oset obj :cover (alist-get 'cover json))
 	(oset obj :parent (org-notion-parse-parent json))
@@ -1304,23 +1415,8 @@ slot.")
 		   (when archived (keyword (:key "NOTION_ARCHIVED" :value ,archived))))))
       (_ (signal 'org-notion-invalid-element-type type)))))
 
-;;;;; Property Item
-(defclass org-notion-property-item (org-notion-object)
-  ((type
-    :initform nil
-    :initarg :type
-    :accessor org-notion-type
-    :type (or symbol null)
-    :documentation "Type of the properties. See variable `org-notion-property-types' for possible values."))
-  :documentation "Notion property_item object - identified by the `:id' slot.")
-
-(cl-defmethod org-notion-from-json ((obj org-notion-property-item)))
-(cl-defmethod org-notion-to-json ((obj org-notion-property-item)))
-(cl-defmethod org-notion-from-org ((obj org-notion-property-item) str))
-(cl-defmethod org-notion-to-org ((obj org-notion-property-item) &optional type))
-
-
 ;;;;; Block
+;; 
 (defclass org-notion-block (org-notion-object)
   ((type
     :initform 'unsupported
@@ -1329,12 +1425,22 @@ slot.")
     :type symbol
     :documentation "Type of block. See variable
     `org-notion-block-types' for possible values.")
-   (created
-    :initarg :created
+   (created_by
+    :initform nil
+    :initarg :created_by
+    :type (or org-notion-user null)
+    :documentation "User who created this block.")
+   (created_time
+    :initarg :created_time
     :documentation "Datetime when this block was created.")
-   (updated
-    :initarg :updated
-    :documentation "Datetime when this block was last updated.")
+   (last_edited_by
+    :initform nil
+    :initarg :last_edited_by
+    :type (or org-notion-user null)
+    :documentation "Last user to edit this block.")
+   (last_edited_time
+    :initarg :last_edited_time
+    :documentation "Datetime when this block was last edited.")
    (archived
     :initform nil
     :initarg :archived
@@ -1373,10 +1479,12 @@ slot.")
 	;; capture early block data from json
 	(oset obj :id (alist-get 'id json))
 	(oset obj :type (intern (alist-get 'type json)))
-	(oset obj :created (alist-get 'created_time json))
-	(oset obj :updated (alist-get 'last_edited_time json))
-	(oset obj :archived (unless (alist-get 'archived json) t))
-	(oset obj :has_children (unless (alist-get 'has_children json) t))
+	(oset obj :created_by (alist-get 'created_by json))
+	(oset obj :created_time (alist-get 'created_time json))
+	(oset obj :last_edited_by (alist-get 'last_edited_by json))
+	(oset obj :last_edited_time (alist-get 'last_edited_time json))
+	(oset obj :archived (org-notion--get-flag 'archived json))
+	(oset obj :has_children (org-notion--get-flag 'has_children json))
 	;; use value of :type slot to capture text, children, and
 	;; properties.
 	(pcase (org-notion-type obj)
@@ -1434,7 +1542,7 @@ slot.")
 ;; (cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _))
 
 ;;;;; Text
-
+;; 
 ;; Parent class for Notion Rich-text objects. Instances of subclasses
 ;; are de/serialized as an array of JSON objects for interaction with
 ;; the Notion API and as Org syntax.
@@ -1512,7 +1620,7 @@ slot.")
 `org-notion-rich-text' of type 'equation'.")
 
 ;;; API Calls
-
+;; 
 ;;;###autoload
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
@@ -1655,25 +1763,28 @@ be \"page\" or \"database\"."
 		     (org-notion-log "%s" results)
 		     (setq org-notion-last-dispatch-result results)))))))
 
-;;; Org
-;;;; Parsers
+;;;; Org Parsers
+;; 
 ;; TODO 2023-01-10
-(defun org-notion-parse-buffer (&optional visible-only)
-  "Recursively parse the buffer and return an
- `org-notion-object'.
+(defun org-notion-parse-buffer (&optional target visible-only)
+  "Recursively parse the buffer TARGET and return an
+ `org-notion-object'. Defaults to current buffer.
 
 When VISIBLE-ONLY is non-nil, don’t parse contents of hidden
-elements.
-"
+elements."
   (interactive)
-  (with-current-buffer (current-buffer)
-    (let ((tree (org-notion-parse-buffer visible-only)))
+  (with-current-buffer (or target (current-buffer))
+    (let ((tree (org-element-parse-buffer nil visible-only)))
       tree)))
 
-(defun org-notion-parse-element (str &optional type)
-  "Parse STR as `org-notion-object' TYPE.")
+(defun org-notion-element-context (&optional class)
+  "Parse STR as `org-notion-object' TYPE.
+
+TYPE is a symbol and an alist key in `org-notion-class-names'."
+  (org-notion-class-assoc class))
 
 ;;;; Commands
+;; 
 ;;;###autoload
 (defun org-notion-browse (&optional uuid)
   "Open a Notion page by UUID."
@@ -1682,25 +1793,25 @@ elements.
       (browse-url (format "https://www.notion.so/%s" id))
     (message "failed to find %s" (org-notion-field-assoc 'id))))
 
-;;;###autoload
-(defun org-notion-push (&optional subtree)
-  "Push current buffer to Notion.so. If SUBTREE is non-nil, limit to
-the current heading."
-  (interactive)
-  (with-current-buffer (current-buffer)
-    (let ((tree (if subtree
-		    (progn (org-back-to-heading t)
-			   (org-notion-parse-element 'heading))
-		  (org-notion-parse-buffer)))))))
+;; ;;;###autoload
+;; (defun org-notion-push (&optional subtree)
+;;   "Push current buffer to Notion.so. If SUBTREE is non-nil, limit to
+;; the current heading."
+;;   (interactive)
+;;   (with-current-buffer (current-buffer)
+;;     (let ((tree (if subtree
+;; 		    (progn (org-back-to-heading t)
+;; 			   (org-notion-parse-element 'heading))
+;; 		  (org-notion-parse-buffer)))))))
 
-;;;###autoload
-(defun org-notion-pull (&optional buf)
-  "Pull and update the current headline from Notion. If BUF is
-non-nil pull updates for entire buffer."
-  (interactive))
+;; ;;;###autoload
+;; (defun org-notion-pull (&optional buf)
+;;   "Pull and update the current headline from Notion. If BUF is
+;; non-nil pull updates for entire buffer."
+;;   (interactive))
 
 ;;; Minor-mode
-
+;; 
 (defun org-notion--kbd (key)
   "Convert KEY to internal Emacs key representation with `org-notion-keymap-prefix'"
   (kbd (concat org-notion-keymap-prefix " " key)))
