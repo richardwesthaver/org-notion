@@ -123,13 +123,13 @@ interactive prompt if token isn't found."
   :group 'org-notion)
 
 (defcustom org-notion-coding-system 'utf-8
-  "Use custom coding system for org-notion."
+  "Custom coding system for org-notion."
   :type 'symbol
   :group 'org-notion)
 
 (defcustom org-notion-cache-enable t
   "Enable org-notion object cache if value is non-nil. Note that the
-default caching behavior is to write a message and retur nil when
+default caching behavior is to write a message and return nil when
 attempting to insert a duplicate object, which occurs often in
 testing and cause `should' to return unexpected results."
   :type 'boolean
@@ -145,7 +145,7 @@ but the current value is replaced."
   :type 'boolean)
 
 (defcustom org-notion-completion-ignore-case t
-  "org-notion specific value of `completion-ignore-case'"
+  "Org-notion specific value of `completion-ignore-case'"
   :group 'org-notion
   :type 'boolean)
 
@@ -411,6 +411,11 @@ property-drawer."
 	 (type (alist-get 'type parent))
 	 (id (alist-get (intern type) parent)))
     (cons type id)))
+
+;; TODO 2023-03-06: for `org-notion-from-org'
+(defun org-notion-parse-user-str (str)
+  "Parse a string containing the User's name, email, or both."
+  nil)
 
 (defun org-notion--get-results (json)
   (when (equal (alist-get 'object json) "list")
@@ -1059,7 +1064,7 @@ a bot. Identified by the `:id' slot.")
       (let* ((elt (caddr (org-element-parse-buffer)))
 	     (type (car elt))
 	     (map-key nil))
-	(fset map-key (lambda (k v)
+	(fset 'map-key (lambda (k v)
 			(pcase k
 			  ("NOTION_USER" (setq name v))
 			  ("NOTION_ID" (setq id v))
@@ -1093,7 +1098,6 @@ a bot. Identified by the `:id' slot.")
 	  (_ (signal 'org-notion-invalid-element-type type)))
 	(cache-instance obj)
 	obj))))
-
 
 ;;;;; Property Item
 ;; 
@@ -1154,6 +1158,7 @@ a bot. Identified by the `:id' slot.")
     :type (or org-notion-user null)
     :documentation "User who created this block.")
    (created_time
+    :initform (format-time-string "%FT%T%z")
     :initarg :created_time
     :documentation "Datetime when this block was created.")
    (last_edited_by
@@ -1162,6 +1167,7 @@ a bot. Identified by the `:id' slot.")
     :type (or org-notion-user null)
     :documentation "Last user to edit this block.")
    (last_edited_time
+    :initform (format-time-string "%FT%T%z")
     :initarg :last_edited_time
     :documentation "Datetime when this block was last edited.")
    (icon
@@ -1224,26 +1230,26 @@ a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-to-json ((obj org-notion-database))
   "Convert database to json."
-  (with-slots (id title created_by created_time updated_by updated_time icon cover properties parent url) obj
+  (with-slots (id title created_by created_time last_edited_by last_edited_time icon cover properties parent url) obj
     (list (cons 'object "database") (cons 'id id)
 	  (cons 'title title) (cons 'created created_time)
-	  (cons 'updated updated_time) (cons 'icon icon)
+	  (cons 'updated last_edited_time) (cons 'icon icon)
 	  (cons 'cover cover) (cons 'properties properties)
 	  (cons 'parent parent) (cons 'url url))))
 
 (cl-defmethod org-notion-to-org ((obj org-notion-database) &optional type)
   "Convert database to org-element TYPE."
-  (with-slots (id title created updated icon cover properties parent url) obj
+  (with-slots (id title created_by created_time last_edited_by last_edited_time icon cover properties parent url) obj
     ;; TODO 2023-01-07: we can do better here
     (let ((props
-	   (when (or id icon cover created updated url)
+	   (when (or id icon cover created_time last_edited_time url)
 	     (org-notion--property-drawer
 	      `((id . ,id)
-		(icon . ,icon)
-		(cover . ,cover)
-		(created . ,created)
-		(updated . ,updated)
-		(url . ,url))))))
+	       (icon . ,icon)
+	       (cover . ,cover)
+	       (created . ,created_time)
+	       (updated . ,last_edited_time)
+	       (url . ,url))))))
       (pcase type
 	((or 'nil 'heading)
 	 (org-element-interpret-data
@@ -1265,7 +1271,7 @@ a bot. Identified by the `:id' slot.")
       (let* ((elt (caddr (org-element-parse-buffer)))
 	     (type (car elt))
 	     (map-key nil))
-	(fset map-key (lambda (k v)
+	(fset 'map-key (lambda (k v)
 	   (pcase k
 	     ("NOTION_ID" (setq id v))
 	     ("NOTION_URL" (setq url v))
