@@ -24,9 +24,9 @@
 
 ;; org-notion is a simple package that integrates the beauty and
 ;; convenience of Notion with your Org-mode workflow. 
-;; 
-;; 
+
 ;;; Code:
+
 (eval-when-compile (require 'cl-lib))
 (require 'org)
 (require 'org-element)
@@ -36,7 +36,7 @@
 (require 'url)
 
 ;;; Constants
-;; 
+
 (defconst org-notion-host "api.notion.com"
   "FQDN of Notion API. This is used to create an entry with
 `auth-source-secrets-create'.")
@@ -110,7 +110,7 @@ block type.")
   "Notion parent object types.")
 
 ;;; Custom
-;; 
+
 (defgroup org-notion nil
   "Customization group for org-notion."
   :tag "Org Notion"
@@ -187,7 +187,7 @@ completion is offered.
   :group 'org-notion)
 
 ;;; Vars
-;; 
+
 (defvar org-notion-endpoint (format "https://%s/v1/" org-notion-host)
     "URI of Notion API endpoint")
 
@@ -264,7 +264,7 @@ org-notion-class type names, i.e. org-notion-database.")
   "List of `org-notion-class' symbols.")
 
 ;;; Errors
-;; 
+
 (define-error 'org-notion-error "Unknown org-notion error")
 (define-error 'org-notion-invalid-key "Invalid key value" 'org-notion-error)
 (define-error 'org-notion-invalid-uuid "Invalid UUID" 'org-notion-error)
@@ -309,7 +309,7 @@ signaling `org-notion-error' types."
       (signal err msg))))
 
 ;;; Utils
-;; 
+
 ;;;###autoload
 (def-edebug-elem-spec 'org-notion-place '(form))
 
@@ -455,7 +455,7 @@ property-drawer."
   (and (org-notion-uuid-p id1) (org-notion-uuid-p id2)
        (eq t (compare-strings id1 0 nil id2 0 nil))))
 
-;; org utils
+;;;; org utils
 (if (fboundp 'org-link-set-parameters)
     (org-link-set-parameters "notion"
 			     :follow 'org-notion-browse
@@ -495,7 +495,7 @@ headline at POM first, then buffer keywords."
      (cadr (assoc id (org-collect-keywords (list id))))))))
 
 ;;;; Callbacks
-;; 
+
 (defmacro org-notion-with-callback (&rest body)
   "Evaluate BODY as a callback for `org-notion-dispatch'. Errors are
 automatically handled and then `org-notion-last-dispatch-result'
@@ -518,7 +518,7 @@ further processed by BODY before being returned by
   (org-notion-with-callback (org-notion-log "%s" json-data)))
 
 ;;;; Auth
-;; 
+
 (defun org-notion-token (&optional token)
   "Find the Notion API Integration Token.
 If `org-notion-use-auth-source' is t check auth-source first. If
@@ -542,7 +542,7 @@ token at URL `https://www.notion.so/my-integrations'."
 	(read-passwd "Notion API Token: "))))
 
 ;;; OOP
-;; 
+
 ;; Default superclass. This is inherited by all other org-notion
 ;; classes and should only define new static methods. The only method
 ;; implemented is `org-notion-print' which simply prints the fields of
@@ -564,7 +564,7 @@ use `org-notion-object' `org-notion-rich-text' or `org-notion-request' to create
 		    slots)))))
 
 ;;;; Requests
-;; 
+
 (defun org-notion-search-data (query &optional sort filter start_cursor page_size)
   "Prepare data for Notion search request. Return a json object.
 
@@ -820,7 +820,7 @@ return `org-notion-last-dispatch-result'. When async is nil
 	  org-notion-last-dispatch-result)))))
 
 ;;;; Cache
-;; 
+
 (defsubst org-notion-objects (&optional class)
   "Return a list of all org-notion class instances. if CLASS is
 given, only show instances of this class."
@@ -907,11 +907,11 @@ are lists of values."
 	  :documentation "The symbol used to maintain a hashtable
 		 of org-notion instances. The instance hashtable
 		 is treated as a variable, with new instanaces
-		 added to it.")
+		 added to it."))
    :documentation "Mixin used to cache object instances based on
    `eieio-instance-tracker'. Inheritors must override
    `cache' which is a variable used to cache instances."
-   :abstract t))
+   :abstract t)
 
 (cl-defmethod cache-instance ((this org-notion-cache) &rest _slots)
   "Make sure OBJ is in our cache. Optional argument SLOTS are the
@@ -945,7 +945,7 @@ duplicate is detected."
   (puthash (org-notion-id this) this (symbol-value (oref this cache))))
 
 ;;;; Object methods
-;; 
+
 ;; The following generic functions are implemented by
 ;; `org-notion-object' subclasses.
 
@@ -962,7 +962,7 @@ duplicate is detected."
   "Interpret `org-notion-object' OBJ as Org-mode syntax TYPE.")
 
 ;;;; Objects
-;; 
+
 ;; Parent class of Notion objects. The 'id' slot is inherited by
 ;; subclasses. 'cache' is a variable used to store instances.
 (defclass org-notion-object (org-notion-class org-notion-cache)
@@ -976,7 +976,7 @@ duplicate is detected."
     :documentation "Top-level class for Notion API objects.")
 
 ;;;;; User
-;; 
+
 (defclass org-notion-user (org-notion-object)
   ((type
     :initform nil
@@ -1014,6 +1014,7 @@ duplicate is detected."
 a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-user) json)
+  "Interpret JSON as `org-notion-user'."
   (if (string= "user" (alist-get 'object json))
       (progn
 	(oset-and
@@ -1100,7 +1101,7 @@ a bot. Identified by the `:id' slot.")
 	obj))))
 
 ;;;;; Property Item
-;; 
+
 (defclass org-notion-property-item (org-notion-object)
   ((type
     :initform nil
@@ -1110,13 +1111,18 @@ a bot. Identified by the `:id' slot.")
     :documentation "Type of the properties. See variable `org-notion-property-types' for possible values."))
   :documentation "Notion property_item object - identified by the `:id' slot.")
 
-(cl-defmethod org-notion-from-json ((obj org-notion-property-item)))
-(cl-defmethod org-notion-to-json ((obj org-notion-property-item)))
+(cl-defmethod org-notion-from-json ((obj org-notion-property-item) json)
+    "Interpret JSON as `org-notion-property-item'.")
+
+(cl-defmethod org-notion-to-json ((obj org-notion-property-item))
+  "Interpret `org-notion-property-item' as JSON.")
+
 (cl-defmethod org-notion-from-org ((obj org-notion-property-item) str))
+
 (cl-defmethod org-notion-to-org ((obj org-notion-property-item) &optional type))
 
 ;;;;; Parent Object
-;; 
+
 (defclass org-notion-parent-obj (org-notion-object)
   ((type
     :initform nil
@@ -1127,6 +1133,7 @@ a bot. Identified by the `:id' slot.")
   :documentation "Notion parent object - identified by the `:id' slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-parent-obj) json)
+  "Interpret JSON as `org-notion-parent-obj'."
   (setf json (or (alist-get 'parent json) json))
   (let* ((type (alist-get 'type json))
 	 (type_id (intern type))
@@ -1144,7 +1151,7 @@ a bot. Identified by the `:id' slot.")
 ;; (cl-defmethod org-notion-to-org ((obj (subclass org-notion-rich-text)) &optional type))
 
 ;;;;; Database
-;; 
+
 (defclass org-notion-database (org-notion-object)
   ((title
     :initform nil
@@ -1202,6 +1209,7 @@ a bot. Identified by the `:id' slot.")
 `:id' slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-database) json)
+  "Interpret JSON as `org-notion-database'."
   ;; quick check
   (if (string= (alist-get 'object json) "database")
       (progn
@@ -1224,8 +1232,8 @@ a bot. Identified by the `:id' slot.")
 	 :properties (alist-get 'properties json)
 	 :parent (org-notion-parse-parent json)
 	 :url (alist-get 'url json))
-	 (cache-instance obj))
-	(error "expected database object, found %s" (alist-get 'object json)))
+	(cache-instance obj))
+    (error "expected database object, found %s" (alist-get 'object json)))
   obj)
 
 (cl-defmethod org-notion-to-json ((obj org-notion-database))
@@ -1311,7 +1319,7 @@ a bot. Identified by the `:id' slot.")
 	obj))))
 
 ;;;;; Page
-;; 
+
 (defclass org-notion-page (org-notion-object)
   (
    (created_by
@@ -1367,6 +1375,7 @@ a bot. Identified by the `:id' slot.")
 slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-page) json)
+  "Interpret JSON as `org-notion-page'."
   (if (string= "page" (alist-get 'object json))
       (progn
 	(oset obj :id (alist-get 'id json))
@@ -1422,7 +1431,7 @@ slot.")
       (_ (signal 'org-notion-invalid-element-type type)))))
 
 ;;;;; Block
-;; 
+
 (defclass org-notion-block (org-notion-object)
   ((type
     :initform 'unsupported
@@ -1480,6 +1489,7 @@ slot.")
 `:id' slot.")
 
 (cl-defmethod org-notion-from-json ((obj org-notion-block) json)
+  "Interpret JSON as `org-notion-block'."
   (if (string= "block" (alist-get 'object json))
       (progn
 	;; capture early block data from json
@@ -1548,7 +1558,7 @@ slot.")
 ;; (cl-defmethod org-notion-to-org ((obj org-notion-block) &optional _))
 
 ;;;;; Text
-;; 
+
 ;; Parent class for Notion Rich-text objects. Instances of subclasses
 ;; are de/serialized as an array of JSON objects for interaction with
 ;; the Notion API and as Org syntax.
@@ -1626,7 +1636,7 @@ slot.")
 `org-notion-rich-text' of type 'equation'.")
 
 ;;; API Calls
-;; 
+
 ;;;###autoload
 (defun org-notion-get-current-user ()
   "Retrieve the bot user associated with the current
@@ -1770,7 +1780,7 @@ be \"page\" or \"database\"."
 		     (setq org-notion-last-dispatch-result results)))))))
 
 ;;;; Org Parsers
-;; 
+
 ;; TODO 2023-01-10
 (defun org-notion-parse-buffer (&optional target visible-only)
   "Recursively parse the buffer TARGET and return an
@@ -1790,7 +1800,7 @@ TYPE is a symbol and an alist key in `org-notion-class-names'."
   (org-notion-class-assoc class))
 
 ;;;; Commands
-;; 
+
 ;;;###autoload
 (defun org-notion-browse (&optional uuid)
   "Open a Notion page by UUID."

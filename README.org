@@ -1,8 +1,11 @@
 #+TITLE: org-notion
-#+DATE: 2023-01-15
+#+DATE: 2023-04-22
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
+
+- STATUS : ALPHA
+  - This package isn't ready for use yet.
 
 [[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for keeping notes, maintaining
 TODO lists, and project planning. It is a very powerful text-based
@@ -27,19 +30,32 @@ which can be hacked to your liking.
 All classes are shown below. There's an abstract =org-notion-class=
 which all classes inherit as well as a special =org-notion-cache=
 class which stores a cache of =org-notion-object= instances.
+
 #+begin_example
-org-notion-class                      
-  +--org-notion-request               
-  +--org-notion-cache                 
-  +--org-notion-object           
-  |    +--org-notion-block       
-  |    +--org-notion-page        
-  |    +--org-notion-database    
-  |    +--org-notion-user        
-  +--org-notion-rich-text             
-  |    +--org-notion-inline-equation  
-  |    +--org-notion-inline-mention   
-  |    +--org-notion-inline-text      
+  +-------------------------------------------+
+  |  org-notion-class                         |
+  |    +--org-notion-rich-text                | 
+  |    |    +--org-notion-inline-equation     |
+  |    |    +--org-notion-inline-mention      |
+  |    |    +--org-notion-inline-text         |
+  |    +--org-notion-object                   |
+  |    |    +--org-notion-block               |
+  |    |    +--org-notion-page                |
+  |    |    +--org-notion-database            |
+  |    |    +--org-notion-parent-obj          |
+  |    |    +--org-notion-property-item       |
+  |    |    +--org-notion-user                |
+  |    +--org-notion-cache                    |
+  |    |    +--org-notion-object              |
+  |    |         +--org-notion-block          |
+  |    |         +--org-notion-page           |
+  |    |         +--org-notion-database       |
+  |    |         +--org-notion-parent-obj     |
+  |    |         +--org-notion-property-item  |
+  |    |         +--org-notion-user           |
+  |    +--org-notion-request                  |
+  |    +--org-notion-request-data             |
+  +-------------------------------------------+
 #+end_example
 
 The parsing is achieved with the help of [[https://orgmode.org/worg/dev/org-element-api.html][org-element]] and [[https://github.com/emacs-mirror/emacs/blob/master/lisp/json.el][json.el]]. An
