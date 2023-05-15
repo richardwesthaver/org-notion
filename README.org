@@ -77,7 +77,7 @@ When running a command for the first time such as
 cached internally for future calls but will not persist across
 sessions (after restarting the emacs daemon).
 
-The default behavior is to first check with [[https://www.gnu.org/software/emacs/manual/html_mono/auth/index.html][auth-sources]] before
+The default behavior is to first check with [[https://www.gnu.org/software/emacs/manual/html_mono/auth][auth-sources]] before
 sending requests (=~/.authinfo= or =~/.authinfo.gpg=). This is highly
 recommended as it avoids the prompt and is more secure. You can
 disable the check if you wish to temporarily use a different token
