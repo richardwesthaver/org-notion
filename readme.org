@@ -1,9 +1,9 @@
 #+TITLE: org-notion
-#+DATE: 2023-01-15
+#+DATE: 2023-07-12
 #+DESCRIPTION: Notion.so Org-mode Extension
 #+AUTHOR: ellis
 #+EMAIL: ellis@rwest.io
-
+* Overview
 [[https://orgmode.org/][Org-mode]] is the [[https://www.gnu.org/software/emacs/][GNU Emacs]] major-mode for keeping notes, maintaining
 TODO lists, and project planning. It is a very powerful text-based
 system for organizing your life in plaintext.
@@ -15,7 +15,14 @@ realtime collaboration, and as of 2021 an [[https://developers.notion.com/][offi
 =org-notion= is an Emacs package that uses this API to integrate the
 beauty of Notion with your Org-mode workflow.
 
-* Overview
+** Status
++ state :: ON HOLD
+This package is not yet complete. I plan to continue development in
+the next few months but am open to contribs and chatting about
+design/features in the meantime. Check the [[*Dev Log][Dev Log]] for updates.
+* TODO Introduction
+
+* Design
 This package wraps the full Notion API with support for all web
 requests and object types. The requests are dispatched via the methods
 specializing on the =org-notion-request= EIEIO class instance. The
@@ -83,7 +90,7 @@ recommended as it avoids the prompt and is more secure. You can
 disable the check if you wish to temporarily use a different token
 with =(setq org-notion-check-auth-source nil)=.
 
-* Usage
+* TODO Usage
 The autoloaded functions in this package provide the high-level
 interface. Most notable of these is =org-notion-mode=, which is a
 minor-mode you can add as a hook to =org-mode=.
@@ -117,7 +124,11 @@ defauls are show below.
 - Prior Art
   - [[https://github.com/ahungry/org-jira][ahungry/org-jira]]
   - [[https://github.com/RadekMolenda/org-notion][RadekMolenda/org-notion]]
-
+* Dev Log
+** [2023-07-12 Wed] project state
+I haven't done much with this project (sorry!) in the past several
+months. It's been a busy start to the year with a series of
+developments that have taken priority.
 * COMMENT notes
 ** v2 roadmap
 *** user capabilities

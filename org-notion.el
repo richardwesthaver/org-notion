@@ -902,11 +902,11 @@ are lists of values."
 	  :documentation "The symbol used to maintain a hashtable
 		 of org-notion instances. The instance hashtable
 		 is treated as a variable, with new instanaces
-		 added to it.")
+		 added to it."))
    :documentation "Mixin used to cache object instances based on
    `eieio-instance-tracker'. Inheritors must override
    `cache' which is a variable used to cache instances."
-   :abstract t))
+   :abstract t)
 
 (cl-defmethod cache-instance ((this org-notion-cache) &rest _slots)
   "Make sure OBJ is in our cache. Optional argument SLOTS are the
@@ -1156,13 +1156,13 @@ a bot. Identified by the `:id' slot.")
    (created_time
     :initarg :created_time
     :documentation "Datetime when this block was created.")
-   (last_edited_by
+   (updated_by
     :initform nil
-    :initarg :last_edited_by
+    :initarg :updated_by
     :type (or org-notion-user null)
     :documentation "Last user to edit this block.")
-   (last_edited_time
-    :initarg :last_edited_time
+   (updated_time
+    :initarg :updated_time
     :documentation "Datetime when this block was last edited.")
    (icon
     :initform nil
@@ -1211,8 +1211,8 @@ a bot. Identified by the `:id' slot.")
 		    (alist-get 'title json))))) ; this is a vector
 	 :created_by (alist-get 'created_by json)
 	 :created_time (alist-get 'created_time json)
-	 :last_edited_by (alist-get 'last_edited_by json)
-	 :last_edited_time (alist-get 'last_edited_time json)
+	 :updated_by (alist-get 'last_edited_by json)
+	 :updated_time (alist-get 'last_edited_time json)
 	 :icon (alist-get 'icon json)
 	 :cover (alist-get 'cover json)
 	 :properties (alist-get 'properties json)
@@ -1233,16 +1233,16 @@ a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-to-org ((obj org-notion-database) &optional type)
   "Convert database to org-element TYPE."
-  (with-slots (id title created updated icon cover properties parent url) obj
+  (with-slots (id title created_by created_time updated_by updated_time icon cover properties parent url) obj
     ;; TODO 2023-01-07: we can do better here
     (let ((props
-	   (when (or id icon cover created updated url)
+	   (when (or id icon cover created_time updated_time url)
 	     (org-notion--property-drawer
 	      `((id . ,id)
 		(icon . ,icon)
 		(cover . ,cover)
-		(created . ,created)
-		(updated . ,updated)
+		(created . ,created_time)
+		(updated . ,updated_time)
 		(url . ,url))))))
       (pcase type
 	((or 'nil 'heading)
@@ -1259,7 +1259,7 @@ a bot. Identified by the `:id' slot.")
 
 (cl-defmethod org-notion-from-org ((obj org-notion-database) &optional str)
   "Parse STR org element into an `org-notion-database' OBJ."
-  (with-slots (id title created updated icon cover properties parent url) obj
+  (with-slots (id title created_by created_time updated_by updated_time icon cover properties parent url) obj
     (with-temp-buffer
       (insert str)
       (let* ((elt (caddr (org-element-parse-buffer)))
@@ -1655,13 +1655,13 @@ enabled."
 			)))))))
 
 ;;;###autoload
-(defun org-notion-get-user (id)
+(defun org-notion-get-user (&optional id)
   "Get user with given ID from workspace."
   (interactive)
   (org-notion-dispatch
    (org-notion-request
     :method 'user
-    :data id
+    :data (or id (oref org-notion-current-user :id))
     :callback (org-notion-with-callback
 		(when (equal (cdar json-data) "user")
 		  (org-notion-from-json (org-notion-user) json-data))))))
