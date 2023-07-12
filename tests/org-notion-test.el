@@ -43,7 +43,7 @@
 
 (defvar org-notion--mock-data
   (with-current-buffer (find-file-noselect org-notion--mock-file)
-    (org-element-parse-buffer)))
+    (buffer-substring (point-min) (point-max))))
 
 (defmacro should= (a b &optional test)
   "(should (equal/TEST A B))"
@@ -91,9 +91,7 @@
 
 ;; TODO 2022-12-27
 (ert-deftest user-from-org-ok ()
-  (let ((mock org-notion--mock-data))
-    ;; (should (org-notion-from-org (org-notion-user) ))
-    ))
+    (should (org-notion-from-org (org-notion-user) org-notion--mock-data)))
 
 (ert-deftest db-from-json-ok ()
   (let ((db (json-read-file (expand-file-name"json/database.json"))))
@@ -103,7 +101,9 @@
   (should (org-notion-to-json (org-notion-database))))
 
 (ert-deftest db-to-org-ok ()
-  (should (org-notion-to-org (org-notion-database) 'heading)))
+  (should (org-notion-to-org (org-notion-database) 'heading))
+  (should (org-notion-to-org (org-notion-database) 'kw))
+  (should (org-notion-to-org (org-notion-database) 'prop)))
 
 ;; TODO 2022-12-27
 (ert-deftest db-from-org-ok ())
